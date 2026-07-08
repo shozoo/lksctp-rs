@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 <!-- next-header -->
 ## [Unreleased] - ReleaseDate
 
+## [0.1.0] - 2026-07-08
+
 ### Added
 - Synchronous `SctpSocket` (one-to-one / one-to-many) over Linux kernel SCTP
   with no libsctp dependency: bindx/connectx, sendmsg/recvmsg with
