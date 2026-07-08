@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Load kernel SCTP module
+        run: sudo modprobe sctp || echo "::warning::sctp module unavailable; integration tests will self-skip"
+      - run: cargo test --all-targets
+      - run: cargo test --no-default-features
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo fmt --check

@@ -1,0 +1,22 @@
+{
+  "name": "lksctp-rs",
+  "image": "mcr.microsoft.com/devcontainers/rust:1-bookworm",
+  // Allows `modprobe sctp` on hosts where SCTP is a loadable module.
+  // Docker Desktop's VM kernel ships SCTP built-in, so tests work there
+  // without it, but it is harmless and helps on plain Linux hosts.
+  "runArgs": ["--privileged"],
+  "mounts": [
+    // Keep the container's build artifacts out of the (host-shared)
+    // workspace: bind-mount I/O is slow and host artifacts are for the
+    // host's target triple anyway.
+    "source=lksctp-rs-target,target=${containerWorkspaceFolder}/target,type=volume"
+  ],
+  "onCreateCommand": "sudo modprobe sctp || true; grep -i sctp /proc/net/protocols || echo 'WARNING: kernel SCTP unavailable; integration tests will self-skip'",
+  // The named volume is created root-owned; hand it to the container user.
+  "postCreateCommand": "sudo chown vscode:vscode ${containerWorkspaceFolder}/target",
+  "customizations": {
+    "vscode": {
+      "extensions": ["rust-lang.rust-analyzer"]
+    }
+  }
+}

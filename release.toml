@@ -1,0 +1,16 @@
+# cargo-release configuration (https://github.com/crate-ci/cargo-release)
+#
+# Usage:
+#   cargo release patch          # plan (dry-run by default)
+#   cargo release patch -x       # execute: bump, changelog, commit, tag, publish, push
+allow-branch = ["main"]
+tag-name = "v{{version}}"
+pre-release-commit-message = "chore: release v{{version}}"
+publish = true
+push = true
+sign-commit = false
+sign-tag = false
+pre-release-replacements = [
+  { file = "CHANGELOG.md", search = "## \\[Unreleased\\] - ReleaseDate", replace = "## [Unreleased] - ReleaseDate\n\n## [{{version}}] - {{date}}", exactly = 1 },
+]
+pre-release-hook = ["cargo", "test", "--all-targets"]

@@ -1,0 +1,30 @@
+[package]
+name = "lksctp"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+description = "Rust bindings for Linux kernel SCTP with tokio integration and no libsctp dependency"
+readme = "README.md"
+keywords = ["sctp", "networking", "telecom", "linux", "tokio"]
+categories = ["network-programming", "os::linux-apis", "asynchronous"]
+repository = "https://github.com/shozoo/lksctp-rs"
+exclude = [".devcontainer/", ".github/", "release.toml"]
+
+[package.metadata.docs.rs]
+# The real API surface exists on Linux; build the docs there.
+default-target = "x86_64-unknown-linux-gnu"
+targets = ["x86_64-unknown-linux-gnu"]
+
+[features]
+default = ["tokio"]
+tokio = ["dep:tokio"]
+
+[dependencies]
+tokio = { version = "1", features = ["net"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync"] }
