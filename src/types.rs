@@ -612,7 +612,7 @@ impl AssocStatus {
 // Event subscription
 // -------------------------------------------------------------------------
 
-/// Notification classes subscribable via `SCTP_EVENT` (kernel 4.11+).
+/// Notification classes subscribable via `SCTP_EVENT` (kernel 5.0+).
 ///
 /// Subscribed events are delivered inline through the receive path as
 /// [`RecvMsg::Notification`].

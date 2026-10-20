@@ -15,13 +15,14 @@ Built for telecom signaling protocols (NGAP, M3UA, Diameter, ...) that need:
 - inline **notifications** (association up/down, path state changes,
   shutdown, stream reset, ...)
 - deep **introspection**: association status (`SCTP_STATUS`) and per-path
-  state — cwnd, srtt, RTO, MTU, reachability (`SCTP_GET_PEER_ADDR_INFO`)
+  state — cwnd, srtt, RTO, MTU, reachability (`SCTP_GET_PEER_ADDR_INFO`),
+  plus per-association chunk and SACK counters (`SCTP_GET_ASSOC_STATS`)
 - a fast async data path: `AsyncFd` readiness loops straight onto
   `sendmsg(2)`/`recvmsg(2)`, no intermediate buffering or task hops
 
 ## Requirements
 
-- **Runtime**: Linux kernel 4.11+ with the `sctp` module (`modprobe sctp`).
+- **Runtime**: Linux kernel 5.0+ with the `sctp` module (`modprobe sctp`).
   No user-space SCTP library needed.
 - **Build**: Rust 1.85+ (edition 2024), any platform. On non-Linux targets
   the crate compiles but all constructors return
@@ -37,6 +38,28 @@ Built for telecom signaling protocols (NGAP, M3UA, Diameter, ...) that need:
 | `SctpListener` / `SctpStream` | `SOCK_STREAM` (one-to-one) | TCP-like accept/connect; one association per socket |
 | `SctpEndpoint` | `SOCK_SEQPACKET` (one-to-many) | UDP-like; many associations keyed by `AssocId`, `peeloff` to detach |
 | `SctpSocket` | either | synchronous low-level building block |
+
+## Configuration and statistics
+
+`SctpSocket` exposes association retransmission limits (`assoc_info`),
+delayed SACK settings (`delayed_sack`), RTO and per-path settings, socket
+buffer sizes, and address or port reuse. Pass `AssocId::FUTURE` to set
+defaults for associations created later. The stream and listener builders
+also expose these settings before connection setup.
+
+For other pre-connect options, configure an `SctpSocket` first, then use
+`SctpListener::from_socket` after `listen`,
+`SctpStream::connectx_from_socket`, or `SctpEndpoint::from_socket` to register
+it with Tokio. `SctpStream::abort` closes an association immediately;
+`set_abort_on_drop` also works with streams shared through `Arc`.
+
+Use `subscribe_event_for` with an association ID to change a notification
+subscription after establishment. `AssocId::ALL` covers current and future
+associations on a one-to-many socket.
+
+Call `assoc_stats` on `SctpSocket`, `SctpStream`, or `SctpEndpoint` to read
+association counters. Each read starts a new maximum-RTO observation period;
+the chunk and SACK counters remain cumulative.
 
 ## Example
 
@@ -110,7 +133,8 @@ implementation without a container.
 
 Early development. Implemented: sync + async one-to-one and one-to-many
 sockets, bindx/connectx, notification parsing, `SCTP_STATUS` /
-`SCTP_GET_PEER_ADDR_INFO` introspection, per-path tuning
+`SCTP_GET_PEER_ADDR_INFO` introspection, association statistics,
+retransmission and delayed SACK tuning, per-path tuning
 (`SCTP_PEER_ADDR_PARAMS`), peeloff, blocking timeouts. Planned: `poll_*` /
 `try_*` APIs, PR-SCTP send options, stream reset/add (RFC 6525),
 `sendmmsg`/`recvmmsg` batching, benchmarks.

@@ -270,7 +270,7 @@ fn tail(buf: &[u8], off: usize) -> Vec<u8> {
 /// `MSG_NOTIFICATION` set).
 ///
 /// `buf` must contain the complete notification; the receive path guarantees
-/// this by rejecting notification reads without `MSG_EOR`.
+/// this by reassembling reads until `MSG_EOR`.
 pub(crate) fn parse(buf: &[u8]) -> io::Result<Notification> {
     let sn_type = u16_at(buf, 0)?;
     let sn_flags = u16_at(buf, 2)?;

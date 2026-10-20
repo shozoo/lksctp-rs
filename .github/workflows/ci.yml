@@ -13,9 +13,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Load kernel SCTP module
-        run: sudo modprobe sctp || echo "::warning::sctp module unavailable; integration tests will self-skip"
+      - name: Require kernel SCTP support
+        run: |
+          sudo modprobe sctp || true
+          python3 -c 'import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 132); s.close()'
       - run: cargo test --all-targets
       - run: cargo test --no-default-features
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo fmt --check
+      - run: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+  portability:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: cargo check --all-targets
+      - run: cargo check --no-default-features
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.85.0
+      - run: cargo check --all-targets
+      - run: cargo check --no-default-features
