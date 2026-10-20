@@ -21,9 +21,10 @@ pub struct AssocId(pub i32);
 impl AssocId {
     /// Applies an option to future associations (also the "unspecified" id).
     pub const FUTURE: AssocId = AssocId(sys::SCTP_FUTURE_ASSOC);
-    /// Applies an option to all current associations.
+    /// Applies an option to all current associations (kernel 5.1+).
     pub const CURRENT: AssocId = AssocId(sys::SCTP_CURRENT_ASSOC);
-    /// Applies an option to all current and future associations.
+    /// Applies an option to all current and future associations
+    /// (kernel 5.1+).
     pub const ALL: AssocId = AssocId(sys::SCTP_ALL_ASSOC);
 }
 
@@ -612,7 +613,7 @@ impl AssocStatus {
 // Event subscription
 // -------------------------------------------------------------------------
 
-/// Notification classes subscribable via `SCTP_EVENT` (kernel 5.0+).
+/// Notification classes subscribable via `SCTP_EVENT`.
 ///
 /// Subscribed events are delivered inline through the receive path as
 /// [`RecvMsg::Notification`].

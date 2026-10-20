@@ -18,8 +18,9 @@ caller-provided buffer is too small.
 
 ## Requirements and installation
 
-- **Runtime:** Linux kernel 5.0 or newer with SCTP support. The crate uses
-  `SCTP_EVENT`, which is needed for async connection establishment.
+- **Runtime:** Linux kernel 5.1 or newer with SCTP support. Notification
+  subscriptions use `SCTP_EVENT` (5.0) and its `SCTP_ALL_ASSOC` selector
+  (5.1); `SctpStream::connect` relies on them to observe establishment.
 - **Toolchain:** Rust 1.85 or newer (edition 2024).
 - **Other platforms:** The crate compiles, but socket constructors return
   `io::ErrorKind::Unsupported`.

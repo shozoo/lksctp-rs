@@ -316,7 +316,8 @@ pub struct sctp_prinfo {
     pub pr_value: u32,
 }
 
-/// `SCTP_EVENT` socket option payload (kernel 5.0+).
+/// `SCTP_EVENT` socket option payload (kernel 5.0+; the `SCTP_*_ASSOC`
+/// selectors in `se_assoc_id` need 5.1+).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct sctp_event {

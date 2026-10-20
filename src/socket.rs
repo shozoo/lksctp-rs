@@ -152,7 +152,7 @@ impl SctpSocket {
     }
 
     /// Subscribes to (or unsubscribes from) a notification class
-    /// (`SCTP_EVENT`, kernel 5.0+). Applies to future associations on a
+    /// (`SCTP_EVENT`). Applies to future associations on a
     /// one-to-many socket; on an established one-to-one socket, it applies
     /// to the current association.
     pub fn subscribe_event(&self, event: EventType, on: bool) -> io::Result<()> {

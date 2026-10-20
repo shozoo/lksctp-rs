@@ -7,7 +7,7 @@
 //! transport plus deep visibility into association and path state.
 //!
 //! The crate compiles on every platform, but sockets can only be created on
-//! Linux (kernel 5.0+); elsewhere constructors return
+//! Linux (kernel 5.1+); elsewhere constructors return
 //! [`std::io::ErrorKind::Unsupported`].
 //!
 //! ## Layers
