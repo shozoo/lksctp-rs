@@ -35,8 +35,22 @@ fn cvt_size(ret: libc::ssize_t) -> io::Result<usize> {
     }
 }
 
-fn connectx_id_is_ready(error: &io::Error, flags: i32) -> bool {
-    error.raw_os_error() == Some(libc::EINPROGRESS) && flags & libc::O_NONBLOCK != 0
+/// Interprets a failed `SCTP_SOCKOPT_CONNECTX3`. `EINPROGRESS` means
+/// "establishment continues in the background" on a non-blocking socket,
+/// but the kernel returns the same value on a *blocking* socket whose
+/// `SO_SNDTIMEO` expired (`sctp_wait_for_connect` jumps to `do_nonblock`),
+/// which is a timeout from the caller's point of view.
+fn classify_connectx_error(error: io::Error, fl_flags: i32) -> io::Result<()> {
+    if error.raw_os_error() != Some(libc::EINPROGRESS) {
+        Err(error)
+    } else if fl_flags & libc::O_NONBLOCK != 0 {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "SCTP association setup timed out (SO_SNDTIMEO)",
+        ))
+    }
 }
 
 /// Control buffer for sending one SCTP_SNDINFO cmsg.
@@ -227,7 +241,9 @@ impl Socket {
     /// Returns the new association id. On a non-blocking socket the kernel
     /// reports `EINPROGRESS`; the id is still valid, so that case is also
     /// returned as success (establishment completes asynchronously and is
-    /// observed via writability / `SCTP_COMM_UP`).
+    /// observed via `SCTP_COMM_UP`). On a blocking socket `EINPROGRESS`
+    /// only occurs when the send timeout expired and is reported as
+    /// `TimedOut`; see [`classify_connectx_error`].
     pub(crate) fn connectx(&self, addrs: &[SocketAddr]) -> io::Result<AssocId> {
         if addrs.is_empty() {
             return Err(io::Error::new(io::ErrorKind::InvalidInput, "no addresses"));
@@ -252,13 +268,13 @@ impl Socket {
             return Ok(AssocId(param.assoc_id));
         }
         let e = io::Error::last_os_error();
-        if e.raw_os_error() == Some(libc::EINPROGRESS) {
-            let flags = cvt(unsafe { libc::fcntl(self.raw(), libc::F_GETFL) })?;
-            if connectx_id_is_ready(&e, flags) {
-                return Ok(AssocId(param.assoc_id));
-            }
-        }
-        Err(e)
+        let fl_flags = if e.raw_os_error() == Some(libc::EINPROGRESS) {
+            cvt(unsafe { libc::fcntl(self.raw(), libc::F_GETFL) })?
+        } else {
+            0
+        };
+        classify_connectx_error(e, fl_flags)?;
+        Ok(AssocId(param.assoc_id))
     }
 
     // -- data path ----------------------------------------------------------
@@ -904,12 +920,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn connectx_in_progress_requires_nonblocking_mode() {
-        let in_progress = io::Error::from_raw_os_error(libc::EINPROGRESS);
-        assert!(!connectx_id_is_ready(&in_progress, 0));
-        assert!(connectx_id_is_ready(&in_progress, libc::O_NONBLOCK));
+    fn connectx_in_progress_depends_on_blocking_mode() {
+        let in_progress = || io::Error::from_raw_os_error(libc::EINPROGRESS);
+        assert!(classify_connectx_error(in_progress(), libc::O_NONBLOCK).is_ok());
+        assert_eq!(
+            classify_connectx_error(in_progress(), 0)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::TimedOut
+        );
         let refused = io::Error::from_raw_os_error(libc::ECONNREFUSED);
-        assert!(!connectx_id_is_ready(&refused, libc::O_NONBLOCK));
+        assert_eq!(
+            classify_connectx_error(refused, libc::O_NONBLOCK)
+                .unwrap_err()
+                .raw_os_error(),
+            Some(libc::ECONNREFUSED)
+        );
     }
 
     #[test]

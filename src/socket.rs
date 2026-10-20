@@ -87,9 +87,11 @@ impl SctpSocket {
     /// Connects to a multi-homed peer (`sctp_connectx(3)`), returning the new
     /// association's id.
     ///
-    /// On a blocking socket this waits for establishment. On a non-blocking
-    /// socket it returns immediately (kernel `EINPROGRESS` is treated as
-    /// success) and establishment must be observed via the `CommUp`
+    /// On a blocking socket this waits for establishment; if a
+    /// [`send_timeout`](Self::set_send_timeout) is set and expires first,
+    /// it fails with [`io::ErrorKind::TimedOut`]. On a non-blocking socket
+    /// it returns immediately (kernel `EINPROGRESS` is treated as success)
+    /// and establishment must be observed via the `CommUp`
     /// notification; note that SCTP sockets report writability *during* the
     /// handshake, so TCP-style connect-completion polling does not apply.
     /// The returned id is meaningful on one-to-many sockets; one-to-one
