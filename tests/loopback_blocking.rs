@@ -592,6 +592,27 @@ fn socket_options_roundtrip() {
     sock.set_send_buffer_size(64 * 1024).unwrap();
     assert!(sock.send_buffer_size().unwrap() >= 64 * 1024);
 
+    let send_size = sock.send_buffer_size().unwrap();
+    let recv_size = sock.recv_buffer_size().unwrap();
+    let too_large = usize::try_from(i32::MAX).unwrap() + 1;
+    assert_eq!(
+        sock.set_send_buffer_size(too_large).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        sock.set_recv_buffer_size(usize::MAX).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+    assert_eq!(sock.send_buffer_size().unwrap(), send_size);
+    assert_eq!(sock.recv_buffer_size().unwrap(), recv_size);
+
+    sock.set_recv_timeout(Some(Duration::from_nanos(1)))
+        .unwrap();
+    sock.set_send_timeout(Some(Duration::from_nanos(1)))
+        .unwrap();
+    assert!(sock.recv_timeout().unwrap().unwrap() >= Duration::from_micros(1));
+    assert!(sock.send_timeout().unwrap().unwrap() >= Duration::from_micros(1));
+
     let init = InitParams {
         num_ostreams: 17,
         max_instreams: 33,

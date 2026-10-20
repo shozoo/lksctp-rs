@@ -35,6 +35,15 @@ fn cvt_size(ret: libc::ssize_t) -> io::Result<usize> {
     }
 }
 
+fn checked_buffer_size(size: usize) -> io::Result<i32> {
+    i32::try_from(size).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "socket buffer size exceeds i32::MAX",
+        )
+    })
+}
+
 /// Interprets a failed `SCTP_SOCKOPT_CONNECTX3`. `EINPROGRESS` means
 /// "establishment continues in the background" on a non-blocking socket,
 /// but the kernel returns the same value on a *blocking* socket whose
@@ -686,7 +695,11 @@ impl Socket {
     }
 
     pub(crate) fn set_send_buffer_size(&self, size: usize) -> io::Result<()> {
-        self.setsockopt(libc::SOL_SOCKET, libc::SO_SNDBUF, &(size as i32))
+        self.setsockopt(
+            libc::SOL_SOCKET,
+            libc::SO_SNDBUF,
+            &checked_buffer_size(size)?,
+        )
     }
 
     pub(crate) fn recv_buffer_size(&self) -> io::Result<usize> {
@@ -695,7 +708,11 @@ impl Socket {
     }
 
     pub(crate) fn set_recv_buffer_size(&self, size: usize) -> io::Result<()> {
-        self.setsockopt(libc::SOL_SOCKET, libc::SO_RCVBUF, &(size as i32))
+        self.setsockopt(
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUF,
+            &checked_buffer_size(size)?,
+        )
     }
 
     fn set_timeout(&self, opt: i32, dur: Option<std::time::Duration>) -> io::Result<()> {
@@ -709,7 +726,10 @@ impl Socket {
                 }
                 libc::timeval {
                     tv_sec: d.as_secs().min(libc::time_t::MAX as u64) as libc::time_t,
-                    tv_usec: d.subsec_micros() as libc::suseconds_t,
+                    // A nonzero duration below one microsecond must not
+                    // become a zero timeval, which disables the timeout.
+                    tv_usec: d.subsec_micros().max(u32::from(d.as_secs() == 0))
+                        as libc::suseconds_t,
                 }
             }
             None => libc::timeval {

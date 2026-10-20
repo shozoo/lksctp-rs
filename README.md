@@ -229,6 +229,8 @@ Some kernel semantics matter when configuring a socket:
   of them; query `local_addr` or `local_addrs` for the chosen port. After a
   failed `bindx_add`, discard the socket because the kernel may retain a
   partial bind.
+- Send and receive buffer sizes above `i32::MAX` are rejected. Smaller
+  requests remain subject to the kernel's socket buffer limits.
 - `assoc_stats` returns cumulative chunk, SACK, and packet counters. Reading
   it restarts the maximum-RTO observation period. `max_rto_kernel_ticks`
   is in kernel ticks, not milliseconds.
@@ -252,7 +254,8 @@ Disable the default feature to use `SctpSocket` without a Tokio dependency.
 The socket is blocking unless `set_nonblocking(true)` is called; send and
 receive timeouts use `SO_SNDTIMEO` and `SO_RCVTIMEO`. An expired receive
 timeout surfaces as `io::ErrorKind::WouldBlock`; a blocking `connectx` whose
-send timeout expires fails with `io::ErrorKind::TimedOut`.
+send timeout expires fails with `io::ErrorKind::TimedOut`. Nonzero timeouts
+below one microsecond stay enabled; the kernel may round them up.
 
 ```rust,no_run
 use std::time::Duration;

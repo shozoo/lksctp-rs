@@ -147,6 +147,7 @@ impl SctpStream {
 }
 
 common::impl_common_sockopts!(SctpStream);
+common::impl_reuse_port_sockopts!(SctpStream);
 
 /// Builder for outbound [`SctpStream`] connections.
 ///

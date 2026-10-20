@@ -277,16 +277,6 @@ macro_rules! impl_common_sockopts {
                 crate::net::common::sock(&self.io).set_reuse_address(enabled)
             }
 
-            /// Returns whether `SCTP_REUSE_PORT` is enabled.
-            pub fn reuse_port(&self) -> std::io::Result<bool> {
-                crate::net::common::sock(&self.io).reuse_port()
-            }
-
-            /// Sets `SCTP_REUSE_PORT` on a one-to-one socket before binding.
-            pub fn set_reuse_port(&self, enabled: bool) -> std::io::Result<()> {
-                crate::net::common::sock(&self.io).set_reuse_port(enabled)
-            }
-
             /// Subscribes to (or unsubscribes from) a notification class
             /// (`SCTP_EVENT`); events arrive through the receive path.
             /// On one-to-many sockets this changes future associations only.
@@ -390,6 +380,25 @@ macro_rules! impl_common_sockopts {
 }
 
 pub(crate) use impl_common_sockopts;
+
+/// `SCTP_REUSE_PORT` applies only to one-to-one sockets.
+macro_rules! impl_reuse_port_sockopts {
+    ($ty:ty) => {
+        impl $ty {
+            /// Returns whether `SCTP_REUSE_PORT` is enabled.
+            pub fn reuse_port(&self) -> std::io::Result<bool> {
+                crate::net::common::sock(&self.io).reuse_port()
+            }
+
+            /// Sets `SCTP_REUSE_PORT`; configure it before binding.
+            pub fn set_reuse_port(&self, enabled: bool) -> std::io::Result<()> {
+                crate::net::common::sock(&self.io).set_reuse_port(enabled)
+            }
+        }
+    };
+}
+
+pub(crate) use impl_reuse_port_sockopts;
 
 /// Exposes only options that have a meaning on a listening socket. Association
 /// defaults always use `SCTP_FUTURE_ASSOC`; an accepted stream exposes its own

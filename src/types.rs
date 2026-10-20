@@ -249,6 +249,8 @@ pub enum RecvMsg {
         /// `MSG_EOR`: the buffer holds a complete message. `false` means the
         /// message was larger than the buffer (partial delivery); the
         /// remainder arrives in subsequent reads on the same stream.
+        /// Notifications may arrive between data fragments, so reassembly
+        /// must also handle [`RecvMsg::Notification`].
         eor: bool,
     },
     Notification(Notification),

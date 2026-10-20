@@ -326,6 +326,7 @@ impl SctpSocket {
     }
 
     /// Sets the send buffer size (`SO_SNDBUF`), capped by `net.core.wmem_max`.
+    /// Values above `i32::MAX` are rejected with `InvalidInput`.
     pub fn set_send_buffer_size(&self, size: usize) -> io::Result<()> {
         self.inner.set_send_buffer_size(size)
     }
@@ -337,6 +338,7 @@ impl SctpSocket {
 
     /// Sets the receive buffer size (`SO_RCVBUF`), capped by
     /// `net.core.rmem_max`. Feeds the advertised receiver window (rwnd).
+    /// Values above `i32::MAX` are rejected with `InvalidInput`.
     pub fn set_recv_buffer_size(&self, size: usize) -> io::Result<()> {
         self.inner.set_recv_buffer_size(size)
     }
@@ -348,6 +350,8 @@ impl SctpSocket {
     /// [`io::ErrorKind::WouldBlock`]. A zero duration is rejected with
     /// `InvalidInput` (matching `std::net`). Has no effect on a
     /// non-blocking socket, and therefore none on the async tokio types.
+    /// Nonzero durations below one microsecond are passed as one
+    /// microsecond; the kernel may round them up further.
     pub fn set_recv_timeout(&self, dur: Option<std::time::Duration>) -> io::Result<()> {
         self.inner.set_recv_timeout(dur)
     }
