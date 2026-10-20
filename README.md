@@ -25,13 +25,13 @@ caller-provided buffer is too small.
 - **Other platforms:** The crate compiles, but socket constructors return
   `io::ErrorKind::Unsupported`.
 
-The `tokio` feature is enabled by default. Add Tokio separately if you use
-the async API:
+The `tokio` feature is enabled by default. Add Tokio separately for the
+runtime and macros used by the async examples below:
 
 ```toml
 [dependencies]
 lksctp = "0.2"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 For a synchronous-only application, use
@@ -178,23 +178,32 @@ one-to-one `SctpStream` also accepts `AssocId::FUTURE` for its current
 association. Listener methods such as `set_assoc_info` select future
 associations implicitly and do not take an ID.
 
+This example configures a synchronous socket and then hands it to Tokio.
+`SctpListener::from_socket` registers the socket with the reactor, so it must
+run inside a runtime:
+
 ```rust,no_run
 use lksctp::{AssocId, AssocInfo, Family, SackInfo, SctpListener, SctpSocket, Style};
 
-# fn prepare() -> std::io::Result<SctpListener> {
-let socket = SctpSocket::new(Family::Ipv4, Style::OneToOne)?;
-socket.set_assoc_info(AssocId::FUTURE, &AssocInfo {
-    asocmaxrxt: 7,
-    ..Default::default()
-})?;
-socket.set_delayed_sack(AssocId::FUTURE, &SackInfo {
-    delay_ms: 100,
-    freq: 2,
-})?;
-socket.bind(&"127.0.0.1:0".parse().unwrap())?;
-socket.listen(128)?;
-SctpListener::from_socket(socket)
-# }
+#[tokio::main]
+async fn main() -> std::io::Result<()> {
+    let socket = SctpSocket::new(Family::Ipv4, Style::OneToOne)?;
+    socket.set_assoc_info(AssocId::FUTURE, &AssocInfo {
+        asocmaxrxt: 7,
+        ..Default::default()
+    })?;
+    socket.set_delayed_sack(AssocId::FUTURE, &SackInfo {
+        delay_ms: 100,
+        freq: 2,
+    })?;
+    socket.bind(&"127.0.0.1:38412".parse().unwrap())?;
+    socket.listen(128)?;
+
+    let listener = SctpListener::from_socket(socket)?;
+    let (stream, peer) = listener.accept().await?;
+    println!("{peer}: {:?}", stream.status(AssocId::FUTURE)?.state);
+    Ok(())
+}
 ```
 
 Some kernel semantics matter when configuring a socket:
@@ -232,24 +241,27 @@ all its associations. `SctpEndpoint` has no `shutdown`, and one-to-many
 
 Disable the default feature to use `SctpSocket` without a Tokio dependency.
 The socket is blocking unless `set_nonblocking(true)` is called; send and
-receive timeouts use `SO_SNDTIMEO` and `SO_RCVTIMEO`.
+receive timeouts use `SO_SNDTIMEO` and `SO_RCVTIMEO`. An expired receive
+timeout surfaces as `io::ErrorKind::WouldBlock`; a blocking `connectx` whose
+send timeout expires fails with `io::ErrorKind::TimedOut`.
 
 ```rust,no_run
 use std::time::Duration;
+
 use lksctp::{Family, RecvMsg, SctpSocket, Style};
 
-# fn receive_one() -> std::io::Result<()> {
-let socket = SctpSocket::new(Family::Ipv4, Style::OneToOne)?;
-socket.set_recv_timeout(Some(Duration::from_secs(5)))?;
-socket.connectx(&["127.0.0.1:38412".parse().unwrap()])?;
-let mut buf = [0u8; 4096];
-match socket.recv_msg(&mut buf)? {
-    RecvMsg::Data { len: 0, info: None, .. } => println!("peer closed"),
-    RecvMsg::Data { len, .. } => println!("received {len} bytes"),
-    RecvMsg::Notification(event) => println!("{event:?}"),
+fn main() -> std::io::Result<()> {
+    let socket = SctpSocket::new(Family::Ipv4, Style::OneToOne)?;
+    socket.set_recv_timeout(Some(Duration::from_secs(5)))?;
+    socket.connectx(&["127.0.0.1:38412".parse().unwrap()])?;
+    let mut buf = [0u8; 4096];
+    match socket.recv_msg(&mut buf)? {
+        RecvMsg::Data { len: 0, info: None, .. } => println!("peer closed"),
+        RecvMsg::Data { len, .. } => println!("received {len} bytes"),
+        RecvMsg::Notification(event) => println!("{event:?}"),
+    }
+    Ok(())
 }
-# Ok(())
-# }
 ```
 
 ## Scope
@@ -261,18 +273,23 @@ structures remain available through `lksctp::sys`.
 
 ## Development
 
-Unit tests check layouts and protocol parsing. Loopback integration tests
-exercise the kernel SCTP stack for both blocking and Tokio sockets. They
-self-skip where SCTP is unavailable; Linux CI first checks for a working SCTP
-socket so that a skipped integration suite cannot produce a passing run.
-The included devcontainer provides a Linux environment for development from
-macOS:
+Unit tests check layouts and protocol parsing, and the examples in this file
+are compiled as doctests because the README doubles as the crate
+documentation. Loopback integration tests exercise the kernel SCTP stack for
+both blocking and Tokio sockets. They self-skip where SCTP is unavailable;
+Linux CI first checks for a working SCTP socket so that a skipped integration
+suite cannot produce a passing run. The included devcontainer provides a
+Linux environment for development from macOS:
 
 ```console
 $ devcontainer up --workspace-folder .
 $ devcontainer exec --workspace-folder . cargo test --all-targets
 $ devcontainer exec --workspace-folder . cargo test --no-default-features
 ```
+
+`cargo release` runs `scripts/pre-release-check.sh`, which requires Linux
+with kernel SCTP. Run releases from the devcontainer (or another Linux host)
+where your crates.io credentials are available.
 
 ## License
 
