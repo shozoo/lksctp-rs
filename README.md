@@ -4,17 +4,26 @@
 [![docs.rs](https://docs.rs/lksctp/badge.svg)](https://docs.rs/lksctp)
 [![CI](https://github.com/shozoo/lksctp-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/shozoo/lksctp-rs/actions)
 
-`lksctp` is a Rust wrapper around **Linux kernel SCTP**. Its design is to
-stay thin: keep overhead low, use the kernel's SCTP implementation directly,
-and make as much of its socket API available as practical. It does not
-implement SCTP in user space or depend on lksctp-tools (`libsctp`).
+`lksctp` is a Rust wrapper around **Linux kernel SCTP** with **async support
+on Tokio**. Its design is to stay thin: keep overhead low, use the kernel's
+SCTP implementation directly, and make as much of its socket API available as
+practical. It does not implement SCTP in user space or depend on lksctp-tools
+(`libsctp`).
 
-The crate provides a synchronous socket and, by default, Tokio-integrated
-types. Both preserve SCTP's message boundaries, streams, associations,
-multi-homing, notifications, and per-path controls. The async data path uses
-`AsyncFd` readiness with `sendmsg(2)` and `recvmsg(2)`, without an intermediate
-message queue or task hop. Notification fragments are reassembled when the
-caller-provided buffer is too small.
+Two APIs are provided:
+
+- **Async (default `tokio` feature):** `SctpListener`, `SctpStream`, and
+  `SctpEndpoint` integrate with the Tokio reactor the way the `tokio::net`
+  types do. `accept`, `connect`, `send_msg`, and `recv_msg` are `async fn`s
+  driven by `AsyncFd` readiness straight onto `sendmsg(2)` and `recvmsg(2)`,
+  with no intermediate message queue or task hop, and an async connect
+  resolves only once the association is established.
+- **Synchronous:** `SctpSocket` is a blocking (or explicitly nonblocking)
+  socket with no async dependency, usable from plain threads.
+
+Both preserve SCTP's message boundaries, streams, associations, multi-homing,
+notifications, and per-path controls. Notification fragments are reassembled
+when the caller-provided buffer is too small.
 
 ## Requirements and installation
 
