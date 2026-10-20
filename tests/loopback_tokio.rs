@@ -48,6 +48,8 @@ async fn configured_socket_conversion_and_sender_dry() {
         },
     )
     .unwrap();
+    raw.set_send_buffer_size(16384).unwrap();
+    raw.set_nodelay(true).unwrap();
     raw.bind(&localhost(0)).unwrap();
     raw.listen(8).unwrap();
     let listener = SctpListener::from_socket(raw).unwrap();
@@ -63,6 +65,8 @@ async fn configured_socket_conversion_and_sender_dry() {
     assert_eq!(server.assoc_info(AssocId::FUTURE).unwrap().asocmaxrxt, 7);
     assert_eq!(server.delayed_sack(AssocId::FUTURE).unwrap().freq, 2);
     assert_eq!(server.rto_info(AssocId::FUTURE).unwrap().initial, 1500);
+    assert!(server.send_buffer_size().unwrap() >= 16384);
+    assert!(server.nodelay().unwrap());
     server
         .set_assoc_info(
             AssocId::FUTURE,

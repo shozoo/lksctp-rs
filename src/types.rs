@@ -305,8 +305,9 @@ pub struct RtoInfo {
 /// Association parameters (`SCTP_ASSOCINFO`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct AssocInfo {
-    /// Maximum association retransmissions. On a multi-path association,
-    /// Linux rejects values above the sum of per-path retransmission limits.
+    /// Maximum association retransmissions. When changing an established
+    /// association with multiple paths, Linux rejects values above the sum
+    /// of the per-path retransmission limits.
     pub asocmaxrxt: u16,
     /// Number of peer destinations; meaningful only on get.
     pub number_peer_destinations: u16,
@@ -325,7 +326,7 @@ pub struct SackInfo {
     /// Setting zero leaves the stored timer unchanged; a get reports zero
     /// while delayed SACK is disabled.
     pub delay_ms: u32,
-    /// Number of DATA chunks before a SACK. Setting this to 1 disables
+    /// Number of DATA packets before a SACK. Setting this to 1 disables
     /// delayed SACK on Linux. Setting zero leaves the frequency unchanged.
     pub freq: u32,
 }

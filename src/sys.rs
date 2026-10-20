@@ -522,6 +522,8 @@ pub struct sctp_getaddrs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_pointer_width = "32")]
+    use core::mem::align_of;
     use core::mem::{offset_of, size_of};
 
     /// Sizes and offsets must match the kernel ABI on every architecture
@@ -544,6 +546,17 @@ mod tests {
             assert_eq!(offset_of!(sctp_assoc_stats, sas_obs_rto_ipaddr), 8);
             assert_eq!(offset_of!(sctp_assoc_stats, sas_maxrto), 136);
             assert_eq!(offset_of!(sctp_assoc_stats, sas_ictrlchunks), 248);
+        }
+        #[cfg(target_pointer_width = "32")]
+        {
+            let maxrto_offset = 132usize.next_multiple_of(align_of::<u64>());
+            assert_eq!(size_of::<sctp_assoc_stats>(), maxrto_offset + 120);
+            assert_eq!(offset_of!(sctp_assoc_stats, sas_obs_rto_ipaddr), 4);
+            assert_eq!(offset_of!(sctp_assoc_stats, sas_maxrto), maxrto_offset);
+            assert_eq!(
+                offset_of!(sctp_assoc_stats, sas_ictrlchunks),
+                maxrto_offset + 112
+            );
         }
         assert_eq!(size_of::<sctp_assoc_value>(), 8);
         assert_eq!(size_of::<sctp_paddrinfo>(), 152);

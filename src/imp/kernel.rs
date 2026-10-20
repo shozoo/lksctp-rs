@@ -173,7 +173,11 @@ impl Socket {
             let port = self.local_addr()?.port();
             let rest: Vec<_> = addrs[1..]
                 .iter()
-                .map(|addr| SocketAddr::new(addr.ip(), port))
+                .map(|addr| {
+                    let mut addr = *addr;
+                    addr.set_port(port);
+                    addr
+                })
                 .collect();
             self.bindx(&rest, sys::SCTP_SOCKOPT_BINDX_ADD)
         } else {

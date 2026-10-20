@@ -736,6 +736,40 @@ fn multihomed_two_paths() {
     assert_eq!(got.path_max_rxt, 3);
     assert!(got.flags.contains(lksctp::SppFlags::HB_ENABLE));
 
+    let path_limit: u16 = client_view
+        .iter()
+        .map(|addr| {
+            client
+                .peer_addr_params(AssocId::FUTURE, Some(addr))
+                .unwrap()
+                .path_max_rxt
+        })
+        .sum();
+    assert!(
+        client
+            .set_assoc_info(
+                AssocId::FUTURE,
+                &AssocInfo {
+                    asocmaxrxt: path_limit + 1,
+                    ..Default::default()
+                }
+            )
+            .is_err()
+    );
+    client
+        .set_assoc_info(
+            AssocId::FUTURE,
+            &AssocInfo {
+                asocmaxrxt: path_limit,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        client.assoc_info(AssocId::FUTURE).unwrap().asocmaxrxt,
+        path_limit
+    );
+
     // Data still flows over the multi-homed association.
     client
         .send_msg(
