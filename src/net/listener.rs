@@ -17,13 +17,17 @@ use crate::types::{
 /// Options set through [`ListenerBuilder`] or the listener's future-association
 /// methods apply to associations accepted after the change. Association
 /// status, peer paths, and statistics belong to each accepted [`SctpStream`].
+///
+/// Every constructor registers the socket with the Tokio reactor and must
+/// therefore be called from within a Tokio runtime.
 #[derive(Debug)]
 pub struct SctpListener {
     io: Io,
 }
 
 impl SctpListener {
-    /// Registers an already listening one-to-one socket with Tokio.
+    /// Registers an already listening one-to-one socket with Tokio. Must be
+    /// called from within a Tokio runtime.
     pub fn from_socket(sock: SctpSocket) -> io::Result<SctpListener> {
         if sock.inner.style()? != Style::OneToOne || !sock.inner.is_listening()? {
             return Err(io::Error::new(

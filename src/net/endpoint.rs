@@ -28,13 +28,17 @@ use crate::types::{AssocId, Family, InitParams, RecvMsg, SendInfo, Style};
 /// on a one-to-many socket. Send with
 /// [`SendFlags::EOF`](crate::SendFlags::EOF) to close one association
 /// gracefully, or drop the endpoint to close them all.
+///
+/// Every constructor registers the socket with the Tokio reactor and must
+/// therefore be called from within a Tokio runtime.
 #[derive(Debug)]
 pub struct SctpEndpoint {
     io: Io,
 }
 
 impl SctpEndpoint {
-    /// Registers an existing one-to-many socket with Tokio.
+    /// Registers an existing one-to-many socket with Tokio. Must be called
+    /// from within a Tokio runtime.
     pub fn from_socket(sock: SctpSocket) -> io::Result<SctpEndpoint> {
         if sock.inner.style()? != Style::OneToMany {
             return Err(io::Error::new(

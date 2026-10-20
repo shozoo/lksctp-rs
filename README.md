@@ -67,7 +67,8 @@ to those operations.
 options; for another option that must be set before `listen` or `connectx`,
 configure an `SctpSocket` and use `SctpListener::from_socket`,
 `SctpStream::connectx_from_socket`, or `SctpEndpoint::from_socket`. These
-conversions set nonblocking mode and register the socket with Tokio.
+conversions set nonblocking mode and register the socket with Tokio, so they
+must run inside a Tokio runtime.
 
 ## One-to-one example
 
