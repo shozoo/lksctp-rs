@@ -15,9 +15,9 @@ use crate::types::{AssocId, Family, InitParams, RecvMsg, SendInfo, Style};
 /// Usage resembles [`tokio::net::UdpSocket`], with [`AssocId`] taking the
 /// role addresses play for UDP. A single endpoint can simultaneously act as
 /// a server (after [`EndpointBuilder::listen`], inbound associations are
-/// established by the kernel and announced via `CommUp` notifications) and as a client
-/// ([`connectx`](Self::connectx) or implicit setup by sending to a new
-/// address) — the M3UA-style symmetric deployment maps directly onto this.
+/// established by the kernel and announced via `CommUp` notifications) and as
+/// a client ([`connectx`](Self::connectx) or implicit setup by sending to a
+/// new address) — the M3UA-style symmetric deployment maps directly onto this.
 ///
 /// There is no `accept`: learn about new associations from
 /// [`Notification::AssocChange`](crate::Notification::AssocChange) or from

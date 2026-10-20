@@ -46,6 +46,8 @@ delayed SACK settings (`delayed_sack`), RTO and per-path settings, socket
 buffer sizes, and address or port reuse. Pass `AssocId::FUTURE` to set
 defaults for associations created later. The stream and listener builders
 also expose these settings before connection setup.
+The listener also exposes future-association defaults after `listen`; use
+the accepted `SctpStream` for status, peer addresses, and statistics.
 
 For other pre-connect options, configure an `SctpSocket` first, then use
 `SctpListener::from_socket` after `listen`,

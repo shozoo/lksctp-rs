@@ -14,8 +14,9 @@ use crate::types::{
 /// A one-to-one (`SOCK_STREAM`) SCTP listener, integrated with the tokio
 /// reactor — the SCTP counterpart of [`tokio::net::TcpListener`].
 ///
-/// Options set on the listener via [`ListenerBuilder`] (INIT parameters,
-/// event subscriptions, ...) apply to accepted associations.
+/// Options set through [`ListenerBuilder`] or the listener's future-association
+/// methods apply to associations accepted after the change. Association
+/// status, peer paths, and statistics belong to each accepted [`SctpStream`].
 #[derive(Debug)]
 pub struct SctpListener {
     io: Io,

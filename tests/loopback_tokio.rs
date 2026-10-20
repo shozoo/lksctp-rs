@@ -50,6 +50,7 @@ async fn configured_socket_conversion_and_sender_dry() {
     .unwrap();
     raw.set_send_buffer_size(16384).unwrap();
     raw.set_nodelay(true).unwrap();
+    raw.set_reuse_port(true).unwrap();
     raw.bind(&localhost(0)).unwrap();
     raw.listen(8).unwrap();
     let listener = SctpListener::from_socket(raw).unwrap();
@@ -58,6 +59,7 @@ async fn configured_socket_conversion_and_sender_dry() {
     assert_eq!(listener.assoc_info().unwrap().asocmaxrxt, 7);
     assert_eq!(listener.delayed_sack().unwrap().freq, 2);
     assert_eq!(listener.rto_info().unwrap().initial, 1500);
+    assert!(listener.reuse_port().unwrap());
     listener
         .set_assoc_info(&AssocInfo {
             asocmaxrxt: 8,
@@ -86,6 +88,8 @@ async fn configured_socket_conversion_and_sender_dry() {
     listener.set_recv_buffer_size(32768).unwrap();
     listener.set_nodelay(false).unwrap();
     assert_eq!(listener.peer_addr_params().unwrap().path_max_rxt, 4);
+    assert!(listener.send_buffer_size().unwrap() >= 32768);
+    assert!(listener.recv_buffer_size().unwrap() >= 32768);
     assert!(!listener.nodelay().unwrap());
     let destinations = [addr];
     let client = SctpStream::connectx_from_socket(
@@ -138,6 +142,37 @@ async fn configured_socket_conversion_and_sender_dry() {
     loop {
         if let RecvMsg::Notification(Notification::SenderDry(_)) =
             t(client.recv_msg(&mut buf)).await.unwrap()
+        {
+            break;
+        }
+    }
+}
+
+#[tokio::test]
+async fn listener_subscription_after_listen_is_inherited() {
+    if !sctp_available() {
+        return;
+    }
+    let listener = SctpListener::bind(localhost(0)).unwrap();
+    listener
+        .subscribe_event(EventType::SenderDry, true)
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (client, accepted) = tokio::join!(t(SctpStream::connect(addr)), t(listener.accept()));
+    let client = client.unwrap();
+    let (server, _) = accepted.unwrap();
+    server
+        .send_msg(b"hello", &SendInfo::default())
+        .await
+        .unwrap();
+    let mut buf = [0u8; 64];
+    assert!(matches!(
+        t(client.recv_msg(&mut buf)).await.unwrap(),
+        RecvMsg::Data { .. }
+    ));
+    loop {
+        if let RecvMsg::Notification(Notification::SenderDry(_)) =
+            t(server.recv_msg(&mut buf)).await.unwrap()
         {
             break;
         }

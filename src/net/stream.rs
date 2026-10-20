@@ -21,8 +21,10 @@ use crate::{EventType, imp};
 /// [`SctpEndpoint`](crate::SctpEndpoint). Once established, both sides are
 /// symmetric peers with identical capabilities regardless of who initiated.
 ///
-/// All methods take `&self`; wrap the stream in an `Arc` to read and write
-/// concurrently from different tasks. Sharing one *reader* and one *writer*
+/// Data and option methods take `&self`; wrap the stream in an `Arc` to read
+/// and write concurrently from different tasks. [`abort`](Self::abort)
+/// consumes the stream; use [`set_abort_on_drop`](Self::set_abort_on_drop)
+/// when sharing it through an `Arc`. Sharing one *reader* and one *writer*
 /// task is the intended pattern; see [`recv_msg`](Self::recv_msg) for why
 /// multiple concurrent readers are discouraged.
 #[derive(Debug)]

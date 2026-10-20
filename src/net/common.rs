@@ -413,6 +413,7 @@ macro_rules! impl_listener_sockopts {
             }
 
             /// Sets RTO bounds for associations accepted after this call.
+            /// Zero fields leave the current values unchanged.
             pub fn set_rto_info(&self, info: &crate::RtoInfo) -> std::io::Result<()> {
                 crate::net::common::sock(&self.io).set_rto_info(crate::AssocId::FUTURE, info)
             }
@@ -451,6 +452,8 @@ macro_rules! impl_listener_sockopts {
             }
 
             /// Sets delayed SACK defaults for associations accepted after this call.
+            /// Zero fields leave the stored values unchanged on Linux;
+            /// frequency 1 disables delayed SACK.
             pub fn set_delayed_sack(&self, info: &crate::SackInfo) -> std::io::Result<()> {
                 crate::net::common::sock(&self.io).set_delayed_sack(crate::AssocId::FUTURE, info)
             }

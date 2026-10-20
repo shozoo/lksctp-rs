@@ -47,6 +47,8 @@ impl SctpSocket {
     /// the first bind selects an ephemeral port used for the rest. To
     /// multi-home, either call this with the full list on an unbound socket,
     /// or [`bind`](Self::bind) first and add more addresses with that port.
+    /// If the call fails, the kernel may retain a partial bind; discard the
+    /// socket before retrying a different address list.
     pub fn bindx_add(&self, addrs: &[SocketAddr]) -> io::Result<()> {
         self.inner.bindx_add(addrs)
     }
