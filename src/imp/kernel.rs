@@ -938,10 +938,30 @@ mod tests {
         );
     }
 
+    /// Creates a socket, or returns `None` (skipping the test) only when the
+    /// kernel genuinely lacks SCTP; any other failure is a real error.
+    fn socket_or_skip(style: Style) -> Option<Socket> {
+        match Socket::new(Family::Ipv4, style) {
+            Ok(sock) => Some(sock),
+            Err(e)
+                if matches!(
+                    e.raw_os_error(),
+                    Some(libc::EPROTONOSUPPORT)
+                        | Some(libc::ESOCKTNOSUPPORT)
+                        | Some(libc::EAFNOSUPPORT)
+                ) =>
+            {
+                eprintln!("skipping: kernel SCTP unavailable ({e})");
+                None
+            }
+            Err(e) => panic!("socket creation failed unexpectedly: {e}"),
+        }
+    }
+
     #[test]
     fn address_query_grows_after_enomem() {
-        let Ok(sock) = Socket::new(Family::Ipv4, Style::OneToOne) else {
-            return; // Kernel SCTP is unavailable.
+        let Some(sock) = socket_or_skip(Style::OneToOne) else {
+            return;
         };
         let first: SocketAddr = "127.0.0.1:0".parse().unwrap();
         let second: SocketAddr = "127.0.0.2:0".parse().unwrap();
@@ -958,8 +978,8 @@ mod tests {
     #[cfg(feature = "tokio")]
     #[test]
     fn async_accept_is_nonblocking() {
-        let Ok(listener) = Socket::new(Family::Ipv4, Style::OneToOne) else {
-            return; // Kernel SCTP is unavailable.
+        let Some(listener) = socket_or_skip(Style::OneToOne) else {
+            return;
         };
         listener.bind(&"127.0.0.1:0".parse().unwrap()).unwrap();
         listener.listen(1).unwrap();
@@ -967,6 +987,32 @@ mod tests {
         client.connectx(&[listener.local_addr().unwrap()]).unwrap();
         let (accepted, _) = listener.accept_nonblocking().unwrap();
         let flags = cvt(unsafe { libc::fcntl(accepted.raw(), libc::F_GETFL) }).unwrap();
+        assert_ne!(flags & libc::O_NONBLOCK, 0);
+    }
+
+    #[cfg(feature = "tokio")]
+    #[test]
+    fn async_peeloff_is_nonblocking() {
+        let Some(server) = socket_or_skip(Style::OneToMany) else {
+            return;
+        };
+        server
+            .subscribe_event(EventType::AssocChange, true)
+            .unwrap();
+        server.bind(&"127.0.0.1:0".parse().unwrap()).unwrap();
+        server.listen(1).unwrap();
+        let client = Socket::new(Family::Ipv4, Style::OneToOne).unwrap();
+        client.connectx(&[server.local_addr().unwrap()]).unwrap();
+        let mut buf = [0u8; 256];
+        let assoc_id = loop {
+            if let (RecvMsg::Notification(notification::Notification::AssocChange(change)), _) =
+                server.recv_msg(&mut buf, false).unwrap()
+            {
+                break change.assoc_id;
+            }
+        };
+        let peeled = server.peeloff_nonblocking(assoc_id).unwrap();
+        let flags = cvt(unsafe { libc::fcntl(peeled.raw(), libc::F_GETFL) }).unwrap();
         assert_ne!(flags & libc::O_NONBLOCK, 0);
     }
 }
