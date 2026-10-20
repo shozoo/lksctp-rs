@@ -260,6 +260,8 @@ async fn builder_association_options() {
         .unwrap()
         .reuse_address(true)
         .unwrap()
+        .reuse_port(true)
+        .unwrap()
         .send_buffer_size(16384)
         .unwrap()
         .nodelay(true)
@@ -289,12 +291,15 @@ async fn builder_association_options() {
         .listen(8)
         .unwrap();
     assert!(listener.reuse_address().unwrap());
+    assert!(listener.reuse_port().unwrap());
     assert!(listener.nodelay().unwrap());
     assert!(listener.send_buffer_size().unwrap() >= 16384);
     let dest = [listener.local_addr().unwrap()];
     let client = SctpStream::builder(Family::Ipv4)
         .unwrap()
         .reuse_address(true)
+        .unwrap()
+        .reuse_port(true)
         .unwrap()
         .rto_info(&RtoInfo {
             initial: 1400,
@@ -321,6 +326,7 @@ async fn builder_association_options() {
     let client = client.unwrap();
     let (server, _) = accepted.unwrap();
     assert!(client.reuse_address().unwrap());
+    assert!(client.reuse_port().unwrap());
     assert_eq!(client.rto_info(AssocId::FUTURE).unwrap().initial, 1400);
     assert_eq!(
         client

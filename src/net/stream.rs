@@ -130,6 +130,11 @@ impl SctpStream {
         common::sock(&self.io).peer_addr()
     }
 
+    /// Returns whether `SCTP_REUSE_PORT` was enabled before binding.
+    pub fn reuse_port(&self) -> io::Result<bool> {
+        common::sock(&self.io).reuse_port()
+    }
+
     /// Shuts down the association. `Shutdown::Write` starts the SCTP
     /// graceful shutdown handshake. `Shutdown::Read` only stops local
     /// reads; it sends no SCTP shutdown.
@@ -147,7 +152,6 @@ impl SctpStream {
 }
 
 common::impl_common_sockopts!(SctpStream);
-common::impl_reuse_port_sockopts!(SctpStream);
 
 /// Builder for outbound [`SctpStream`] connections.
 ///
@@ -230,6 +234,12 @@ impl StreamBuilder {
     /// Sets `SO_REUSEADDR` before binding.
     pub fn reuse_address(self, enabled: bool) -> io::Result<StreamBuilder> {
         self.sock.set_reuse_address(enabled)?;
+        Ok(self)
+    }
+
+    /// Sets `SCTP_REUSE_PORT` before binding.
+    pub fn reuse_port(self, enabled: bool) -> io::Result<StreamBuilder> {
+        self.sock.set_reuse_port(enabled)?;
         Ok(self)
     }
 

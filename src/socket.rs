@@ -308,7 +308,8 @@ impl SctpSocket {
     }
 
     /// Sets `SCTP_REUSE_PORT` on a one-to-one socket; call before binding.
-    /// Linux rejects this option on one-to-many sockets.
+    /// Linux returns `EFAULT` after a port has been bound and rejects this
+    /// option on one-to-many sockets.
     pub fn set_reuse_port(&self, enabled: bool) -> io::Result<()> {
         self.inner.set_reuse_port(enabled)
     }

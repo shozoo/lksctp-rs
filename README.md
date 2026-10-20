@@ -224,8 +224,9 @@ Some kernel semantics matter when configuring a socket:
   delayed SACK is disabled.
 - `InitParams::max_init_timeo` is a `u16` in milliseconds. Check that a
   converted duration is at most **65,535 ms** before storing it.
-- Set `SO_REUSEADDR` and one-to-one `SCTP_REUSE_PORT` before binding. With
-  multiple port-zero addresses, `bindx_add` uses one ephemeral port for all
+- Set `SO_REUSEADDR` and one-to-one `SCTP_REUSE_PORT` before binding; the
+  stream and listener builders expose both settings. With multiple port-zero
+  addresses, `bindx_add` uses one ephemeral port for all
   of them; query `local_addr` or `local_addrs` for the chosen port. After a
   failed `bindx_add`, discard the socket because the kernel may retain a
   partial bind.

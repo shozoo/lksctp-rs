@@ -257,6 +257,11 @@ fn reuse_port_roundtrip() {
     assert!(socket.reuse_port().unwrap());
     socket.set_reuse_port(false).unwrap();
     assert!(!socket.reuse_port().unwrap());
+    socket.bind(&localhost(0)).unwrap();
+    assert_eq!(
+        socket.set_reuse_port(true).unwrap_err().raw_os_error(),
+        Some(14)
+    );
     let endpoint = SctpSocket::new(Family::Ipv4, Style::OneToMany).unwrap();
     assert!(endpoint.set_reuse_port(true).is_err());
 }

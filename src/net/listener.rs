@@ -143,6 +143,12 @@ impl ListenerBuilder {
         Ok(self)
     }
 
+    /// Sets `SCTP_REUSE_PORT` before binding.
+    pub fn reuse_port(self, enabled: bool) -> io::Result<ListenerBuilder> {
+        self.sock.set_reuse_port(enabled)?;
+        Ok(self)
+    }
+
     /// Starts listening and registers with the tokio reactor.
     pub fn listen(self, backlog: i32) -> io::Result<SctpListener> {
         self.sock.listen(backlog)?;
