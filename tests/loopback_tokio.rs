@@ -189,10 +189,6 @@ async fn endpoint_from_configured_socket() {
     raw.bind(&localhost(0)).unwrap();
     let endpoint = SctpEndpoint::from_socket(raw).unwrap();
     assert!(endpoint.reuse_address().unwrap());
-    assert_eq!(
-        endpoint.shutdown(Shutdown::Both).unwrap_err().kind(),
-        std::io::ErrorKind::Unsupported
-    );
     assert_ne!(endpoint.local_addr().unwrap().port(), 0);
     endpoint
         .set_assoc_info(

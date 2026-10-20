@@ -223,8 +223,8 @@ reference to send ABORT. `Shutdown::Read` only changes local reads.
 
 For one-to-many sockets, use `SendFlags::EOF` to gracefully close one
 association or `SendFlags::ABORT` to abort one. Dropping the endpoint closes
-all its associations. `SctpEndpoint::shutdown` and one-to-many
-`SctpSocket::shutdown` return `io::ErrorKind::Unsupported` because Linux
+all its associations. `SctpEndpoint` has no `shutdown`, and one-to-many
+`SctpSocket::shutdown` returns `io::ErrorKind::Unsupported`, because Linux
 `shutdown(2)` does not send SCTP SHUTDOWN for that socket style.
 
 ## Synchronous use

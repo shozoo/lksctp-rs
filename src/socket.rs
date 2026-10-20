@@ -409,7 +409,8 @@ impl SctpSocket {
     }
 
     /// Shuts down a one-to-one association (`shutdown(2)`). Returns
-    /// [`io::ErrorKind::Unsupported`] for one-to-many sockets.
+    /// [`io::ErrorKind::Unsupported`] for one-to-many sockets, where Linux
+    /// `shutdown(2)` never sends an SCTP SHUTDOWN.
     ///
     /// `Shutdown::Write` triggers the SCTP graceful shutdown handshake. For
     /// a graceful shutdown of a *single* association on a one-to-many

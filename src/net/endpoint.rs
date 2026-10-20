@@ -1,7 +1,7 @@
 //! One-to-many style async socket: [`SctpEndpoint`].
 
 use std::io;
-use std::net::{Shutdown, SocketAddr};
+use std::net::SocketAddr;
 
 use crate::EventType;
 use crate::net::common::{self, Io};
@@ -23,6 +23,11 @@ use crate::types::{AssocId, Family, InitParams, RecvMsg, SendInfo, Style};
 /// [`Notification::AssocChange`](crate::Notification::AssocChange) or from
 /// [`RcvInfo::assoc_id`](crate::RcvInfo::assoc_id), and detach one into an
 /// [`SctpStream`] with [`peeloff`](Self::peeloff) if desired.
+///
+/// There is no `shutdown`: Linux `shutdown(2)` never sends an SCTP SHUTDOWN
+/// on a one-to-many socket. Send with
+/// [`SendFlags::EOF`](crate::SendFlags::EOF) to close one association
+/// gracefully, or drop the endpoint to close them all.
 #[derive(Debug)]
 pub struct SctpEndpoint {
     io: Io,
@@ -126,17 +131,6 @@ impl SctpEndpoint {
     /// `seconds` (0 disables; `SCTP_AUTOCLOSE`).
     pub fn set_autoclose(&self, seconds: u32) -> io::Result<()> {
         common::sock(&self.io).set_autoclose(seconds)
-    }
-
-    /// Returns [`io::ErrorKind::Unsupported`]: `shutdown(2)` has no SCTP
-    /// effect on one-to-many sockets. Send with
-    /// [`SendFlags::EOF`](crate::SendFlags::EOF) to gracefully shut down one
-    /// association, or drop the endpoint to close all associations.
-    pub fn shutdown(&self, _how: Shutdown) -> io::Result<()> {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "shutdown(2) does not close one-to-many SCTP associations; use SCTP_EOF or drop the endpoint",
-        ))
     }
 }
 
