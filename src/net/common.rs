@@ -160,9 +160,8 @@ pub(crate) async fn established(io: &Io) -> io::Result<()> {
     }
 }
 
-/// Implements the introspection / socket-option methods shared by all three
-/// async socket types by delegating to the underlying raw socket. These are
-/// plain syscalls (no waiting), hence synchronous.
+/// Implements association and socket options shared by streams and endpoints.
+/// These are plain syscalls (no waiting), hence synchronous.
 macro_rules! impl_common_sockopts {
     ($ty:ty) => {
         impl $ty {
@@ -391,3 +390,129 @@ macro_rules! impl_common_sockopts {
 }
 
 pub(crate) use impl_common_sockopts;
+
+/// Exposes only options that have a meaning on a listening socket. Association
+/// defaults always use `SCTP_FUTURE_ASSOC`; an accepted stream exposes its own
+/// status, paths, and statistics.
+macro_rules! impl_listener_sockopts {
+    ($ty:ty) => {
+        impl $ty {
+            /// Returns one bound local address.
+            pub fn local_addr(&self) -> std::io::Result<std::net::SocketAddr> {
+                crate::net::common::sock(&self.io).local_addr()
+            }
+
+            /// Returns all addresses bound to the listener.
+            pub fn local_addrs(&self) -> std::io::Result<Vec<std::net::SocketAddr>> {
+                crate::net::common::sock(&self.io).local_addrs(crate::AssocId::FUTURE)
+            }
+
+            /// Returns the default association RTO bounds in milliseconds.
+            pub fn rto_info(&self) -> std::io::Result<crate::RtoInfo> {
+                crate::net::common::sock(&self.io).rto_info(crate::AssocId::FUTURE)
+            }
+
+            /// Sets RTO bounds for associations accepted after this call.
+            pub fn set_rto_info(&self, info: &crate::RtoInfo) -> std::io::Result<()> {
+                crate::net::common::sock(&self.io).set_rto_info(crate::AssocId::FUTURE, info)
+            }
+
+            /// Returns the default peer path parameters.
+            pub fn peer_addr_params(&self) -> std::io::Result<crate::PeerAddrParams> {
+                crate::net::common::sock(&self.io).peer_addr_params(crate::AssocId::FUTURE, None)
+            }
+
+            /// Sets peer path defaults for associations accepted after this call.
+            pub fn set_peer_addr_params(
+                &self,
+                params: &crate::PeerAddrParams,
+            ) -> std::io::Result<()> {
+                crate::net::common::sock(&self.io).set_peer_addr_params(
+                    crate::AssocId::FUTURE,
+                    None,
+                    params,
+                )
+            }
+
+            /// Returns the default association retransmission parameters.
+            pub fn assoc_info(&self) -> std::io::Result<crate::AssocInfo> {
+                crate::net::common::sock(&self.io).assoc_info(crate::AssocId::FUTURE)
+            }
+
+            /// Sets retransmission defaults for associations accepted after this call.
+            /// Zero fields leave the kernel's current values unchanged.
+            pub fn set_assoc_info(&self, info: &crate::AssocInfo) -> std::io::Result<()> {
+                crate::net::common::sock(&self.io).set_assoc_info(crate::AssocId::FUTURE, info)
+            }
+
+            /// Returns the default delayed SACK parameters.
+            pub fn delayed_sack(&self) -> std::io::Result<crate::SackInfo> {
+                crate::net::common::sock(&self.io).delayed_sack(crate::AssocId::FUTURE)
+            }
+
+            /// Sets delayed SACK defaults for associations accepted after this call.
+            pub fn set_delayed_sack(&self, info: &crate::SackInfo) -> std::io::Result<()> {
+                crate::net::common::sock(&self.io).set_delayed_sack(crate::AssocId::FUTURE, info)
+            }
+
+            /// Subscribes future accepted associations to a notification class.
+            pub fn subscribe_event(
+                &self,
+                event: crate::EventType,
+                on: bool,
+            ) -> std::io::Result<()> {
+                crate::net::common::sock(&self.io).subscribe_event(event, on)
+            }
+
+            /// Subscribes future accepted associations to notification classes.
+            pub fn subscribe_events(&self, events: &[crate::EventType]) -> std::io::Result<()> {
+                for event in events {
+                    self.subscribe_event(*event, true)?;
+                }
+                Ok(())
+            }
+
+            /// Returns whether Nagle-style bundling is disabled.
+            pub fn nodelay(&self) -> std::io::Result<bool> {
+                crate::net::common::sock(&self.io).nodelay()
+            }
+
+            /// Changes Nagle-style bundling for future accepted associations.
+            pub fn set_nodelay(&self, enabled: bool) -> std::io::Result<()> {
+                crate::net::common::sock(&self.io).set_nodelay(enabled)
+            }
+
+            /// Returns the send buffer size.
+            pub fn send_buffer_size(&self) -> std::io::Result<usize> {
+                crate::net::common::sock(&self.io).send_buffer_size()
+            }
+
+            /// Sets the send buffer size for future accepted associations.
+            pub fn set_send_buffer_size(&self, size: usize) -> std::io::Result<()> {
+                crate::net::common::sock(&self.io).set_send_buffer_size(size)
+            }
+
+            /// Returns the receive buffer size.
+            pub fn recv_buffer_size(&self) -> std::io::Result<usize> {
+                crate::net::common::sock(&self.io).recv_buffer_size()
+            }
+
+            /// Sets the receive buffer size for future accepted associations.
+            pub fn set_recv_buffer_size(&self, size: usize) -> std::io::Result<()> {
+                crate::net::common::sock(&self.io).set_recv_buffer_size(size)
+            }
+
+            /// Returns whether `SO_REUSEADDR` was enabled on the listener.
+            pub fn reuse_address(&self) -> std::io::Result<bool> {
+                crate::net::common::sock(&self.io).reuse_address()
+            }
+
+            /// Returns whether `SCTP_REUSE_PORT` was enabled before binding.
+            pub fn reuse_port(&self) -> std::io::Result<bool> {
+                crate::net::common::sock(&self.io).reuse_port()
+            }
+        }
+    };
+}
+
+pub(crate) use impl_listener_sockopts;

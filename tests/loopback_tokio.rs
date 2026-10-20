@@ -54,6 +54,39 @@ async fn configured_socket_conversion_and_sender_dry() {
     raw.listen(8).unwrap();
     let listener = SctpListener::from_socket(raw).unwrap();
     let addr = listener.local_addr().unwrap();
+    assert!(listener.local_addrs().unwrap().contains(&addr));
+    assert_eq!(listener.assoc_info().unwrap().asocmaxrxt, 7);
+    assert_eq!(listener.delayed_sack().unwrap().freq, 2);
+    assert_eq!(listener.rto_info().unwrap().initial, 1500);
+    listener
+        .set_assoc_info(&AssocInfo {
+            asocmaxrxt: 8,
+            ..Default::default()
+        })
+        .unwrap();
+    listener
+        .set_delayed_sack(&SackInfo {
+            delay_ms: 120,
+            freq: 3,
+        })
+        .unwrap();
+    listener
+        .set_rto_info(&RtoInfo {
+            initial: 1400,
+            ..Default::default()
+        })
+        .unwrap();
+    listener
+        .set_peer_addr_params(&PeerAddrParams {
+            path_max_rxt: 4,
+            ..Default::default()
+        })
+        .unwrap();
+    listener.set_send_buffer_size(32768).unwrap();
+    listener.set_recv_buffer_size(32768).unwrap();
+    listener.set_nodelay(false).unwrap();
+    assert_eq!(listener.peer_addr_params().unwrap().path_max_rxt, 4);
+    assert!(!listener.nodelay().unwrap());
     let destinations = [addr];
     let client = SctpStream::connectx_from_socket(
         SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap(),
@@ -62,11 +95,19 @@ async fn configured_socket_conversion_and_sender_dry() {
     let (client, accepted) = tokio::join!(t(client), t(listener.accept()));
     let client = client.unwrap();
     let (server, _) = accepted.unwrap();
-    assert_eq!(server.assoc_info(AssocId::FUTURE).unwrap().asocmaxrxt, 7);
-    assert_eq!(server.delayed_sack(AssocId::FUTURE).unwrap().freq, 2);
-    assert_eq!(server.rto_info(AssocId::FUTURE).unwrap().initial, 1500);
-    assert!(server.send_buffer_size().unwrap() >= 16384);
-    assert!(server.nodelay().unwrap());
+    assert_eq!(server.assoc_info(AssocId::FUTURE).unwrap().asocmaxrxt, 8);
+    assert_eq!(server.delayed_sack(AssocId::FUTURE).unwrap().freq, 3);
+    assert_eq!(server.rto_info(AssocId::FUTURE).unwrap().initial, 1400);
+    assert_eq!(
+        server
+            .peer_addr_params(AssocId::FUTURE, None)
+            .unwrap()
+            .path_max_rxt,
+        4
+    );
+    assert!(server.send_buffer_size().unwrap() >= 32768);
+    assert!(server.recv_buffer_size().unwrap() >= 32768);
+    assert!(!server.nodelay().unwrap());
     server
         .set_assoc_info(
             AssocId::FUTURE,

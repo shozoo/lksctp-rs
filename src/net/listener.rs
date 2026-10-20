@@ -62,7 +62,7 @@ impl SctpListener {
     }
 }
 
-common::impl_common_sockopts!(SctpListener);
+common::impl_listener_sockopts!(SctpListener);
 
 /// Builder for [`SctpListener`].
 #[derive(Debug)]
