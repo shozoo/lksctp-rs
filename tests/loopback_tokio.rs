@@ -113,6 +113,10 @@ async fn endpoint_from_configured_socket() {
     raw.bind(&localhost(0)).unwrap();
     let endpoint = SctpEndpoint::from_socket(raw).unwrap();
     assert!(endpoint.reuse_address().unwrap());
+    assert_eq!(
+        endpoint.shutdown(Shutdown::Both).unwrap_err().kind(),
+        std::io::ErrorKind::Unsupported
+    );
     assert_ne!(endpoint.local_addr().unwrap().port(), 0);
     endpoint
         .set_assoc_info(
@@ -413,6 +417,39 @@ async fn stream_abort_reports_comm_lost() {
                 break;
             }
             _ => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn shared_stream_abort_on_final_drop() {
+    if !sctp_available() {
+        return;
+    }
+    let listener = SctpListener::bind(localhost(0)).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (client, accepted) = tokio::join!(t(SctpStream::connect(addr)), t(listener.accept()));
+    let client = std::sync::Arc::new(client.unwrap());
+    let (server, _) = accepted.unwrap();
+    server
+        .subscribe_event(EventType::AssocChange, true)
+        .unwrap();
+    client.set_abort_on_drop().unwrap();
+    let second = client.clone();
+    drop(client);
+    assert_eq!(
+        server.status(AssocId::FUTURE).unwrap().state,
+        AssocState::Established
+    );
+    drop(second);
+    let mut buf = [0u8; 64];
+    loop {
+        if let RecvMsg::Notification(Notification::AssocChange(change)) =
+            t(server.recv_msg(&mut buf)).await.unwrap()
+        {
+            if change.state == AssocChangeState::CommLost {
+                break;
+            }
         }
     }
 }

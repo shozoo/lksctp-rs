@@ -14,9 +14,8 @@ use crate::types::{AssocId, Family, InitParams, RecvMsg, SendInfo, Style};
 ///
 /// Usage resembles [`tokio::net::UdpSocket`], with [`AssocId`] taking the
 /// role addresses play for UDP. A single endpoint can simultaneously act as
-/// a server (after [`ListenBuilder::listen`](EndpointBuilder::listen)
-/// inbound associations are established by the kernel and announced via
-/// `CommUp` notifications) and as a client
+/// a server (after [`EndpointBuilder::listen`], inbound associations are
+/// established by the kernel and announced via `CommUp` notifications) and as a client
 /// ([`connectx`](Self::connectx) or implicit setup by sending to a new
 /// address) — the M3UA-style symmetric deployment maps directly onto this.
 ///
@@ -73,6 +72,8 @@ impl SctpEndpoint {
 
     /// Sends one message on an existing association selected by
     /// [`SendInfo::assoc_id`].
+    /// Cancellation is safe: a send syscall completes without suspending
+    /// the future.
     pub async fn send_msg(&self, buf: &[u8], info: &SendInfo) -> io::Result<usize> {
         common::write_op(&self.io, |s| s.send_msg(buf, None, info)).await
     }
@@ -83,6 +84,8 @@ impl SctpEndpoint {
     /// establishes one (`CommUp` follows if subscribed). With
     /// [`SendFlags::ADDR_OVER`](crate::SendFlags::ADDR_OVER) the address
     /// overrides the primary path of the existing association.
+    /// Cancellation is safe: a send syscall completes without suspending
+    /// the future.
     pub async fn send_msg_to(
         &self,
         buf: &[u8],
@@ -98,12 +101,16 @@ impl SctpEndpoint {
     /// tasks are memory-safe but make per-stream ordering nondeterministic
     /// and can split partially delivered messages across readers — keep a
     /// single reader task per endpoint.
+    /// Cancellation is safe: each receive attempt completes without
+    /// suspending the future.
     pub async fn recv_msg(&self, buf: &mut [u8]) -> io::Result<RecvMsg> {
         common::read_op(&self.io, |s| s.recv_msg(buf, false).map(|(m, _)| m)).await
     }
 
     /// Like [`recv_msg`](Self::recv_msg), additionally reporting the peer
     /// address the message arrived from.
+    /// Cancellation is safe: each receive attempt completes without
+    /// suspending the future.
     pub async fn recv_msg_from(&self, buf: &mut [u8]) -> io::Result<(RecvMsg, Option<SocketAddr>)> {
         common::read_op(&self.io, |s| s.recv_msg(buf, true)).await
     }
@@ -112,7 +119,7 @@ impl SctpEndpoint {
     /// (`sctp_peeloff(3)`). The endpoint keeps serving its remaining
     /// associations.
     pub fn peeloff(&self, assoc_id: AssocId) -> io::Result<SctpStream> {
-        SctpStream::from_imp(common::sock(&self.io).peeloff(assoc_id)?)
+        SctpStream::from_nonblocking_imp(common::sock(&self.io).peeloff_nonblocking(assoc_id)?)
     }
 
     /// One-to-many only: automatically closes idle associations after
@@ -121,11 +128,15 @@ impl SctpEndpoint {
         common::sock(&self.io).set_autoclose(seconds)
     }
 
-    /// Shuts down every association on this endpoint. For a graceful
-    /// shutdown of a single association, send with
-    /// [`SendFlags::EOF`](crate::SendFlags::EOF) instead.
-    pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
-        common::sock(&self.io).shutdown(how)
+    /// Returns [`io::ErrorKind::Unsupported`]: `shutdown(2)` has no SCTP
+    /// effect on one-to-many sockets. Send with
+    /// [`SendFlags::EOF`](crate::SendFlags::EOF) to gracefully shut down one
+    /// association, or drop the endpoint to close all associations.
+    pub fn shutdown(&self, _how: Shutdown) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "shutdown(2) does not close one-to-many SCTP associations; use SCTP_EOF or drop the endpoint",
+        ))
     }
 }
 

@@ -42,6 +42,18 @@ pub(crate) fn register(sock: imp::Socket) -> io::Result<Io> {
     }
 }
 
+/// Registers a socket created with `SOCK_NONBLOCK` already set.
+pub(crate) fn register_nonblocking(sock: imp::Socket) -> io::Result<Io> {
+    #[cfg(target_os = "linux")]
+    {
+        tokio::io::unix::AsyncFd::new(sock)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        match sock {}
+    }
+}
+
 /// Runs `f` when the socket is readable, retrying on `WouldBlock` with the
 /// readiness cleared (edge-triggered semantics handled by `AsyncFd`).
 pub(crate) async fn read_op<T, F>(io: &Io, mut f: F) -> io::Result<T>
@@ -278,12 +290,26 @@ macro_rules! impl_common_sockopts {
 
             /// Subscribes to (or unsubscribes from) a notification class
             /// (`SCTP_EVENT`); events arrive through the receive path.
+            /// On one-to-many sockets this changes future associations only.
+            /// On an established one-to-one socket it changes the current one.
             pub fn subscribe_event(
                 &self,
                 event: crate::EventType,
                 on: bool,
             ) -> std::io::Result<()> {
                 crate::net::common::sock(&self.io).subscribe_event(event, on)
+            }
+
+            /// Changes a notification subscription for an existing association,
+            /// or uses [`AssocId::ALL`](crate::AssocId::ALL) for existing and
+            /// future associations on a one-to-many socket.
+            pub fn subscribe_event_for(
+                &self,
+                assoc_id: crate::AssocId,
+                event: crate::EventType,
+                on: bool,
+            ) -> std::io::Result<()> {
+                crate::net::common::sock(&self.io).subscribe_event_for(assoc_id, event, on)
             }
 
             /// Subscribes to several notification classes at once.

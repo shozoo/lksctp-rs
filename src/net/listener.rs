@@ -54,9 +54,11 @@ impl SctpListener {
     }
 
     /// Accepts the next established association.
+    /// Cancellation is safe: waiting for readiness accepts nothing, and
+    /// `accept4` completes without suspending the future.
     pub async fn accept(&self) -> io::Result<(SctpStream, SocketAddr)> {
-        let (sock, peer) = common::read_op(&self.io, |s| s.accept()).await?;
-        Ok((SctpStream::from_imp(sock)?, peer))
+        let (sock, peer) = common::read_op(&self.io, |s| s.accept_nonblocking()).await?;
+        Ok((SctpStream::from_nonblocking_imp(sock)?, peer))
     }
 }
 

@@ -33,6 +33,7 @@ pub struct SctpStream {
 impl SctpStream {
     /// Connects an existing socket to a peer and waits for `CommUp`.
     /// The `AssocChange` subscription remains enabled after connection.
+    /// Cancelling this future drops the socket and any association in progress.
     pub async fn connectx_from_socket(
         sock: SctpSocket,
         addrs: &[SocketAddr],
@@ -69,9 +70,9 @@ impl SctpStream {
         })
     }
 
-    pub(crate) fn from_imp(sock: imp::Socket) -> io::Result<SctpStream> {
+    pub(crate) fn from_nonblocking_imp(sock: imp::Socket) -> io::Result<SctpStream> {
         Ok(SctpStream {
-            io: common::register(sock)?,
+            io: common::register_nonblocking(sock)?,
         })
     }
 
@@ -81,6 +82,8 @@ impl SctpStream {
     /// SCTP is message-oriented: the buffer is delivered as a single message
     /// (no partial writes). Messages larger than the send buffer fail with
     /// `EMSGSIZE`.
+    /// Cancellation is safe: waiting for readiness consumes nothing, and
+    /// a send syscall completes without suspending the future.
     pub async fn send_msg(&self, buf: &[u8], info: &SendInfo) -> io::Result<usize> {
         common::write_op(&self.io, |s| s.send_msg(buf, None, info)).await
     }
@@ -89,10 +92,18 @@ impl SctpStream {
     /// Linux rejects `SCTP_ABORT` in `sendmsg` on one-to-one sockets, so
     /// this consumes the stream and closes it with zero `SO_LINGER`.
     /// The close does not wait for queued DATA or send-buffer space.
+    /// When sharing a stream through `Arc`, call `set_abort_on_drop` and
+    /// release all references to close it with ABORT.
     pub fn abort(self) -> io::Result<()> {
-        common::sock(&self.io).set_abort_on_close()?;
+        self.set_abort_on_drop()?;
         let _io = self.io;
         Ok(())
+    }
+
+    /// Makes the final drop of this stream send an immediate ABORT. This
+    /// also works when the stream is shared through `Arc`.
+    pub fn set_abort_on_drop(&self) -> io::Result<()> {
+        common::sock(&self.io).set_abort_on_close()
     }
 
     /// Receives the next message or notification into `buf`.
@@ -106,6 +117,8 @@ impl SctpStream {
     /// point of view, and partially delivered messages (`eor: false`) can
     /// have their fragments split across readers. Keep a single reader task
     /// and distribute parsed messages through channels instead.
+    /// Cancellation is safe: waiting for readiness consumes nothing, and
+    /// each receive attempt completes without suspending the future.
     pub async fn recv_msg(&self, buf: &mut [u8]) -> io::Result<RecvMsg> {
         common::read_op(&self.io, |s| s.recv_msg(buf, false).map(|(m, _)| m)).await
     }
@@ -116,7 +129,8 @@ impl SctpStream {
     }
 
     /// Shuts down the association. `Shutdown::Write` starts the SCTP
-    /// graceful shutdown handshake.
+    /// graceful shutdown handshake. `Shutdown::Read` only stops local
+    /// reads; it sends no SCTP shutdown.
     ///
     /// Note: the *initiator* does not observe handshake completion as a
     /// zero-length read — the kernel grants EOF semantics only to the peer
@@ -225,6 +239,8 @@ impl StreamBuilder {
     /// - the initial `AssocChange(CommUp)` is consumed here and not
     ///   redelivered, even with [`EventType::AssocChange`] subscribed;
     /// - other notifications arriving before establishment are discarded.
+    ///
+    /// Cancelling this future drops the socket and any association in progress.
     pub async fn connectx(self, addrs: &[SocketAddr]) -> io::Result<SctpStream> {
         // Establishment/failure is observed through AssocChange; subscribe
         // temporarily if the caller has not.
