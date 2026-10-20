@@ -5,8 +5,8 @@ use std::net::{Shutdown, SocketAddr};
 
 use crate::imp;
 use crate::types::{
-    AssocId, AssocStatus, EventType, Family, InitParams, PeerAddrInfo, PeerAddrParams, RecvMsg,
-    RtoInfo, SendInfo, Style,
+    AssocId, AssocInfo, AssocStats, AssocStatus, EventType, Family, InitParams, PeerAddrInfo,
+    PeerAddrParams, RecvMsg, RtoInfo, SackInfo, SendInfo, Style,
 };
 
 /// A synchronous SCTP socket (one-to-one or one-to-many style).
@@ -43,9 +43,10 @@ impl SctpSocket {
 
     /// Adds local addresses to the endpoint (`sctp_bindx(SCTP_BINDX_ADD_ADDR)`).
     ///
-    /// All addresses must share one port. To multi-home, either call this
-    /// with the full list on an unbound socket, or [`bind`](Self::bind) first
-    /// and add more addresses (with the same port) here.
+    /// All addresses must share one port. If every address uses port 0,
+    /// the first bind selects an ephemeral port used for the rest. To
+    /// multi-home, either call this with the full list on an unbound socket,
+    /// or [`bind`](Self::bind) first and add more addresses with that port.
     pub fn bindx_add(&self, addrs: &[SocketAddr]) -> io::Result<()> {
         self.inner.bindx_add(addrs)
     }
@@ -240,6 +241,58 @@ impl SctpSocket {
     /// Sets the RTO bounds in milliseconds. Zero fields keep current values.
     pub fn set_rto_info(&self, assoc_id: AssocId, rto: &RtoInfo) -> io::Result<()> {
         self.inner.set_rto_info(assoc_id, rto)
+    }
+
+    /// Returns association retransmission and receive-window parameters.
+    pub fn assoc_info(&self, assoc_id: AssocId) -> io::Result<AssocInfo> {
+        self.inner.assoc_info(assoc_id)
+    }
+
+    /// Returns cumulative association counters and the observed maximum RTO.
+    /// The maximum-RTO observation period restarts on each read; the kernel
+    /// leaves its associated address stale until another maximum is observed.
+    pub fn assoc_stats(&self, assoc_id: AssocId) -> io::Result<AssocStats> {
+        self.inner.assoc_stats(assoc_id)
+    }
+
+    /// Sets association retransmission limit and cookie lifetime. Zero fields
+    /// leave the current kernel values unchanged; window and destination
+    /// count fields are read-only.
+    pub fn set_assoc_info(&self, assoc_id: AssocId, info: &AssocInfo) -> io::Result<()> {
+        self.inner.set_assoc_info(assoc_id, info)
+    }
+
+    /// Returns delayed SACK delay and frequency.
+    pub fn delayed_sack(&self, assoc_id: AssocId) -> io::Result<SackInfo> {
+        self.inner.delayed_sack(assoc_id)
+    }
+
+    /// Sets delayed SACK parameters. Linux treats zero fields as leaving
+    /// stored values unchanged; frequency 1 disables delayed SACK and a
+    /// subsequent get reports `delay_ms = 0, freq = 1`.
+    pub fn set_delayed_sack(&self, assoc_id: AssocId, info: &SackInfo) -> io::Result<()> {
+        self.inner.set_delayed_sack(assoc_id, info)
+    }
+
+    /// Returns whether `SO_REUSEADDR` is enabled.
+    pub fn reuse_address(&self) -> io::Result<bool> {
+        self.inner.reuse_address()
+    }
+
+    /// Sets `SO_REUSEADDR`; call before binding.
+    pub fn set_reuse_address(&self, enabled: bool) -> io::Result<()> {
+        self.inner.set_reuse_address(enabled)
+    }
+
+    /// Returns whether `SCTP_REUSE_PORT` is enabled.
+    pub fn reuse_port(&self) -> io::Result<bool> {
+        self.inner.reuse_port()
+    }
+
+    /// Sets `SCTP_REUSE_PORT` on a one-to-one socket; call before binding.
+    /// Linux rejects this option on one-to-many sockets.
+    pub fn set_reuse_port(&self, enabled: bool) -> io::Result<()> {
+        self.inner.set_reuse_port(enabled)
     }
 
     /// Requests that the given peer address become the primary path

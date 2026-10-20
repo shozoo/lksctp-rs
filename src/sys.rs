@@ -61,6 +61,7 @@ pub const SCTP_MAXSEG: i32 = 13;
 pub const SCTP_STATUS: i32 = 14;
 pub const SCTP_GET_PEER_ADDR_INFO: i32 = 15;
 pub const SCTP_DELAYED_ACK_TIME: i32 = 16;
+pub const SCTP_DELAYED_SACK: i32 = SCTP_DELAYED_ACK_TIME;
 pub const SCTP_CONTEXT: i32 = 17;
 pub const SCTP_FRAGMENT_INTERLEAVE: i32 = 18;
 pub const SCTP_PARTIAL_DELIVERY_POINT: i32 = 19;
@@ -346,6 +347,48 @@ pub struct sctp_assocparams {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
+pub struct sctp_sack_info {
+    pub sack_assoc_id: sctp_assoc_t,
+    pub sack_delay: u32,
+    pub sack_freq: u32,
+}
+
+/// `SCTP_GET_ASSOC_STATS`. `sockaddr_storage` is pointer-aligned in the
+/// kernel; the explicit padding restores that alignment for the byte-only
+/// representation used by this crate.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct sctp_assoc_stats {
+    pub sas_assoc_id: sctp_assoc_t,
+    #[cfg(target_pointer_width = "64")]
+    pub _pad: u32,
+    pub sas_obs_rto_ipaddr: sockaddr_storage,
+    pub sas_maxrto: u64,
+    pub sas_isacks: u64,
+    pub sas_osacks: u64,
+    pub sas_opackets: u64,
+    pub sas_ipackets: u64,
+    pub sas_rtxchunks: u64,
+    pub sas_outofseqtsns: u64,
+    pub sas_idupchunks: u64,
+    pub sas_gapcnt: u64,
+    pub sas_ouodchunks: u64,
+    pub sas_iuodchunks: u64,
+    pub sas_oodchunks: u64,
+    pub sas_iodchunks: u64,
+    pub sas_octrlchunks: u64,
+    pub sas_ictrlchunks: u64,
+}
+
+impl Default for sctp_assoc_stats {
+    fn default() -> Self {
+        // All fields are integers or byte arrays, so the all-zero layout is valid.
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct sctp_assoc_value {
     pub assoc_id: sctp_assoc_t,
     pub assoc_value: u32,
@@ -494,6 +537,14 @@ mod tests {
         assert_eq!(size_of::<sctp_event>(), 8);
         assert_eq!(size_of::<sctp_rtoinfo>(), 16);
         assert_eq!(size_of::<sctp_assocparams>(), 20);
+        assert_eq!(size_of::<sctp_sack_info>(), 12);
+        #[cfg(target_pointer_width = "64")]
+        {
+            assert_eq!(size_of::<sctp_assoc_stats>(), 256);
+            assert_eq!(offset_of!(sctp_assoc_stats, sas_obs_rto_ipaddr), 8);
+            assert_eq!(offset_of!(sctp_assoc_stats, sas_maxrto), 136);
+            assert_eq!(offset_of!(sctp_assoc_stats, sas_ictrlchunks), 248);
+        }
         assert_eq!(size_of::<sctp_assoc_value>(), 8);
         assert_eq!(size_of::<sctp_paddrinfo>(), 152);
         assert_eq!(size_of::<sctp_status>(), 176);

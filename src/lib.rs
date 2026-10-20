@@ -76,6 +76,7 @@ pub use notification::{
 };
 pub use socket::SctpSocket;
 pub use types::{
-    AssocId, AssocState, AssocStatus, EventType, Family, InitParams, PeerAddrInfo, PeerAddrParams,
-    PeerAddrState, Ppid, RcvFlags, RcvInfo, RecvMsg, RtoInfo, SendFlags, SendInfo, SppFlags, Style,
+    AssocId, AssocInfo, AssocState, AssocStats, AssocStatus, EventType, Family, InitParams,
+    PeerAddrInfo, PeerAddrParams, PeerAddrState, Ppid, RcvFlags, RcvInfo, RecvMsg, RtoInfo,
+    SackInfo, SendFlags, SendInfo, SppFlags, Style,
 };

@@ -11,8 +11,8 @@ use crate::cmsg;
 use crate::notification;
 use crate::sys;
 use crate::types::{
-    AssocId, AssocStatus, EventType, Family, InitParams, PeerAddrInfo, PeerAddrParams, RcvInfo,
-    RecvMsg, RtoInfo, SendInfo, Style,
+    AssocId, AssocInfo, AssocStats, AssocStatus, EventType, Family, InitParams, PeerAddrInfo,
+    PeerAddrParams, RcvInfo, RecvMsg, RtoInfo, SackInfo, SendInfo, Style,
 };
 
 pub(crate) struct Socket {
@@ -162,7 +162,23 @@ impl Socket {
     }
 
     pub(crate) fn bindx_add(&self, addrs: &[SocketAddr]) -> io::Result<()> {
-        self.bindx(addrs, sys::SCTP_SOCKOPT_BINDX_ADD)
+        if addrs.len() > 1 && addrs[0].port() == 0 {
+            if addrs.iter().any(|addr| addr.port() != 0) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "all addresses must use port 0 or the same explicit port",
+                ));
+            }
+            self.bindx(&addrs[..1], sys::SCTP_SOCKOPT_BINDX_ADD)?;
+            let port = self.local_addr()?.port();
+            let rest: Vec<_> = addrs[1..]
+                .iter()
+                .map(|addr| SocketAddr::new(addr.ip(), port))
+                .collect();
+            self.bindx(&rest, sys::SCTP_SOCKOPT_BINDX_ADD)
+        } else {
+            self.bindx(addrs, sys::SCTP_SOCKOPT_BINDX_ADD)
+        }
     }
 
     pub(crate) fn bindx_remove(&self, addrs: &[SocketAddr]) -> io::Result<()> {
@@ -443,6 +459,52 @@ impl Socket {
         self.setsockopt(sys::SOL_SCTP, sys::SCTP_NODELAY, &(nodelay as i32))
     }
 
+    pub(crate) fn reuse_address(&self) -> io::Result<bool> {
+        let value: i32 = self.getsockopt(libc::SOL_SOCKET, libc::SO_REUSEADDR)?;
+        Ok(value != 0)
+    }
+
+    pub(crate) fn set_reuse_address(&self, enabled: bool) -> io::Result<()> {
+        self.setsockopt(libc::SOL_SOCKET, libc::SO_REUSEADDR, &(enabled as i32))
+    }
+
+    pub(crate) fn reuse_port(&self) -> io::Result<bool> {
+        let value: i32 = self.getsockopt(sys::SOL_SCTP, sys::SCTP_REUSE_PORT)?;
+        Ok(value != 0)
+    }
+
+    pub(crate) fn set_reuse_port(&self, enabled: bool) -> io::Result<()> {
+        self.setsockopt(sys::SOL_SCTP, sys::SCTP_REUSE_PORT, &(enabled as i32))
+    }
+
+    #[cfg(feature = "tokio")]
+    pub(crate) fn set_abort_on_close(&self) -> io::Result<()> {
+        let linger = libc::linger {
+            l_onoff: 1,
+            l_linger: 0,
+        };
+        self.setsockopt(libc::SOL_SOCKET, libc::SO_LINGER, &linger)
+    }
+
+    #[cfg(feature = "tokio")]
+    pub(crate) fn is_listening(&self) -> io::Result<bool> {
+        let value: i32 = self.getsockopt(libc::SOL_SOCKET, libc::SO_ACCEPTCONN)?;
+        Ok(value != 0)
+    }
+
+    #[cfg(feature = "tokio")]
+    pub(crate) fn style(&self) -> io::Result<Style> {
+        let kind: i32 = self.getsockopt(libc::SOL_SOCKET, libc::SO_TYPE)?;
+        match kind {
+            libc::SOCK_STREAM => Ok(Style::OneToOne),
+            libc::SOCK_SEQPACKET => Ok(Style::OneToMany),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "socket is not SCTP",
+            )),
+        }
+    }
+
     pub(crate) fn set_autoclose(&self, seconds: u32) -> io::Result<()> {
         self.setsockopt(sys::SOL_SCTP, sys::SCTP_AUTOCLOSE, &seconds)
     }
@@ -518,6 +580,61 @@ impl Socket {
             max: raw.srto_max,
             min: raw.srto_min,
         })
+    }
+
+    pub(crate) fn assoc_info(&self, assoc_id: AssocId) -> io::Result<AssocInfo> {
+        let mut raw = sys::sctp_assocparams {
+            sasoc_assoc_id: assoc_id.0,
+            ..Default::default()
+        };
+        self.getsockopt_inout(sys::SOL_SCTP, sys::SCTP_ASSOCINFO, &mut raw)?;
+        Ok(AssocInfo {
+            asocmaxrxt: raw.sasoc_asocmaxrxt,
+            number_peer_destinations: raw.sasoc_number_peer_destinations,
+            peer_rwnd: raw.sasoc_peer_rwnd,
+            local_rwnd: raw.sasoc_local_rwnd,
+            cookie_life: raw.sasoc_cookie_life,
+        })
+    }
+
+    pub(crate) fn assoc_stats(&self, assoc_id: AssocId) -> io::Result<AssocStats> {
+        let mut raw = sys::sctp_assoc_stats {
+            sas_assoc_id: assoc_id.0,
+            ..Default::default()
+        };
+        self.getsockopt_inout(sys::SOL_SCTP, sys::SCTP_GET_ASSOC_STATS, &mut raw)?;
+        Ok(AssocStats::from_sys(&raw))
+    }
+
+    pub(crate) fn set_assoc_info(&self, assoc_id: AssocId, info: &AssocInfo) -> io::Result<()> {
+        let raw = sys::sctp_assocparams {
+            sasoc_assoc_id: assoc_id.0,
+            sasoc_asocmaxrxt: info.asocmaxrxt,
+            sasoc_cookie_life: info.cookie_life,
+            ..Default::default()
+        };
+        self.setsockopt(sys::SOL_SCTP, sys::SCTP_ASSOCINFO, &raw)
+    }
+
+    pub(crate) fn delayed_sack(&self, assoc_id: AssocId) -> io::Result<SackInfo> {
+        let mut raw = sys::sctp_sack_info {
+            sack_assoc_id: assoc_id.0,
+            ..Default::default()
+        };
+        self.getsockopt_inout(sys::SOL_SCTP, sys::SCTP_DELAYED_SACK, &mut raw)?;
+        Ok(SackInfo {
+            delay_ms: raw.sack_delay,
+            freq: raw.sack_freq,
+        })
+    }
+
+    pub(crate) fn set_delayed_sack(&self, assoc_id: AssocId, info: &SackInfo) -> io::Result<()> {
+        let raw = sys::sctp_sack_info {
+            sack_assoc_id: assoc_id.0,
+            sack_delay: info.delay_ms,
+            sack_freq: info.freq,
+        };
+        self.setsockopt(sys::SOL_SCTP, sys::SCTP_DELAYED_SACK, &raw)
     }
 
     pub(crate) fn set_rto_info(&self, assoc_id: AssocId, rto: &RtoInfo) -> io::Result<()> {

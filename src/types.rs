@@ -113,7 +113,9 @@ impl SendFlags {
     /// Send via the given destination address, overriding the primary path
     /// (only meaningful together with an explicit destination address).
     pub const ADDR_OVER: SendFlags = SendFlags(sys::SCTP_ADDR_OVER);
-    /// Abort the association; the payload (if any) becomes the abort cause.
+    /// Abort a one-to-many association; the payload (if any) becomes the abort
+    /// cause. Linux rejects this flag on one-to-one sockets; use
+    /// `SctpStream::abort` with the `tokio` feature.
     pub const ABORT: SendFlags = SendFlags(sys::SCTP_ABORT);
     /// Ask the peer to SACK immediately.
     pub const SACK_IMMEDIATELY: SendFlags = SendFlags(sys::SCTP_SACK_IMMEDIATELY);
@@ -267,7 +269,8 @@ pub struct InitParams {
     pub max_instreams: u16,
     /// Maximum INIT retransmissions.
     pub max_attempts: u16,
-    /// Maximum INIT retransmission timeout in milliseconds.
+    /// Maximum INIT retransmission timeout in milliseconds (0..=65,535).
+    /// Check the range before converting a `Duration` to avoid truncation.
     pub max_init_timeo: u16,
 }
 
@@ -297,6 +300,87 @@ pub struct RtoInfo {
     pub initial: u32,
     pub max: u32,
     pub min: u32,
+}
+
+/// Association parameters (`SCTP_ASSOCINFO`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AssocInfo {
+    /// Maximum association retransmissions. On a multi-path association,
+    /// Linux rejects values above the sum of per-path retransmission limits.
+    pub asocmaxrxt: u16,
+    /// Number of peer destinations; meaningful only on get.
+    pub number_peer_destinations: u16,
+    /// Peer receive window; meaningful only on get.
+    pub peer_rwnd: u32,
+    /// Local receive window; meaningful only on get.
+    pub local_rwnd: u32,
+    /// Cookie lifetime in milliseconds.
+    pub cookie_life: u32,
+}
+
+/// Delayed SACK parameters (`SCTP_DELAYED_SACK`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SackInfo {
+    /// Requested SACK delay in milliseconds (Linux accepts at most 500).
+    /// Setting zero leaves the stored timer unchanged; a get reports zero
+    /// while delayed SACK is disabled.
+    pub delay_ms: u32,
+    /// Number of DATA chunks before a SACK. Setting this to 1 disables
+    /// delayed SACK on Linux. Setting zero leaves the frequency unchanged.
+    pub freq: u32,
+}
+
+/// Association statistics (`SCTP_GET_ASSOC_STATS`). Chunk and packet
+/// counters are cumulative for the lifetime of the association.
+///
+/// `max_rto_kernel_ticks` uses the kernel's raw timer ticks (jiffies), not
+/// milliseconds. Reading this option starts a new maximum-RTO observation
+/// period; the kernel resets its maximum to the association's minimum RTO.
+/// The observed address may be stale if no new maximum was recorded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AssocStats {
+    pub assoc_id: AssocId,
+    pub retransmitted_chunks: u64,
+    pub gap_acks: u64,
+    pub out_of_sequence_tsns: u64,
+    pub sacks_sent: u64,
+    pub sacks_received: u64,
+    pub control_chunks_sent: u64,
+    pub control_chunks_received: u64,
+    pub ordered_data_chunks_sent: u64,
+    pub ordered_data_chunks_received: u64,
+    pub unordered_data_chunks_sent: u64,
+    pub unordered_data_chunks_received: u64,
+    pub duplicate_chunks_received: u64,
+    pub packets_sent: u64,
+    pub packets_received: u64,
+    pub max_rto_kernel_ticks: u64,
+    pub max_rto_address: Option<SocketAddr>,
+}
+
+impl AssocStats {
+    pub(crate) fn from_sys(raw: &sys::sctp_assoc_stats) -> AssocStats {
+        AssocStats {
+            assoc_id: AssocId(raw.sas_assoc_id),
+            retransmitted_chunks: raw.sas_rtxchunks,
+            gap_acks: raw.sas_gapcnt,
+            out_of_sequence_tsns: raw.sas_outofseqtsns,
+            sacks_sent: raw.sas_osacks,
+            sacks_received: raw.sas_isacks,
+            control_chunks_sent: raw.sas_octrlchunks,
+            control_chunks_received: raw.sas_ictrlchunks,
+            ordered_data_chunks_sent: raw.sas_oodchunks,
+            ordered_data_chunks_received: raw.sas_iodchunks,
+            unordered_data_chunks_sent: raw.sas_ouodchunks,
+            unordered_data_chunks_received: raw.sas_iuodchunks,
+            duplicate_chunks_received: raw.sas_idupchunks,
+            packets_sent: raw.sas_opackets,
+            packets_received: raw.sas_ipackets,
+            max_rto_kernel_ticks: raw.sas_maxrto,
+            max_rto_address: crate::addr::read_sockaddr(&raw.sas_obs_rto_ipaddr.bytes)
+                .map(|(addr, _)| addr),
+        }
+    }
 }
 
 /// Association state (`sstat_state`).

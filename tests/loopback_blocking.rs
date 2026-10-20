@@ -17,9 +17,170 @@ use std::time::{Duration, Instant};
 
 use common::{diameter, localhost, m3ua, recv_data_blocking, sctp_available};
 use lksctp::{
-    AssocChangeState, AssocId, AssocState, EventType, Family, InitParams, Notification, Ppid,
-    RecvMsg, RtoInfo, SctpSocket, SendInfo, Style,
+    AssocChangeState, AssocId, AssocInfo, AssocState, EventType, Family, InitParams, Notification,
+    Ppid, RecvMsg, RtoInfo, SackInfo, SctpSocket, SendInfo, Style,
 };
+
+#[test]
+fn association_options_inherit_and_update() {
+    if !sctp_available() {
+        return;
+    }
+    let listener = SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap();
+    listener
+        .set_assoc_info(
+            AssocId::FUTURE,
+            &AssocInfo {
+                asocmaxrxt: 7,
+                cookie_life: 50_000,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    listener
+        .set_delayed_sack(
+            AssocId::FUTURE,
+            &SackInfo {
+                delay_ms: 100,
+                freq: 2,
+            },
+        )
+        .unwrap();
+    assert_eq!(listener.assoc_info(AssocId::FUTURE).unwrap().asocmaxrxt, 7);
+    assert_eq!(listener.delayed_sack(AssocId::FUTURE).unwrap().freq, 2);
+    listener
+        .set_delayed_sack(
+            AssocId::FUTURE,
+            &SackInfo {
+                delay_ms: 0,
+                freq: 1,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        listener.delayed_sack(AssocId::FUTURE).unwrap(),
+        SackInfo {
+            delay_ms: 0,
+            freq: 1
+        }
+    );
+    listener
+        .set_delayed_sack(
+            AssocId::FUTURE,
+            &SackInfo {
+                delay_ms: 100,
+                freq: 2,
+            },
+        )
+        .unwrap();
+    listener.bind(&localhost(0)).unwrap();
+    listener.listen(8).unwrap();
+    let client = SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap();
+    client.connectx(&[listener.local_addr().unwrap()]).unwrap();
+    let (accepted, _) = listener.accept().unwrap();
+    assert!(
+        client
+            .assoc_stats(AssocId::FUTURE)
+            .unwrap()
+            .control_chunks_sent
+            > 0
+    );
+    assert_eq!(accepted.assoc_info(AssocId::FUTURE).unwrap().asocmaxrxt, 7);
+    assert_eq!(
+        accepted.assoc_info(AssocId::FUTURE).unwrap().cookie_life,
+        50_000
+    );
+    assert_eq!(accepted.delayed_sack(AssocId::FUTURE).unwrap().freq, 2);
+    accepted
+        .set_assoc_info(
+            AssocId::FUTURE,
+            &AssocInfo {
+                asocmaxrxt: 5,
+                cookie_life: 30_000,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(accepted.assoc_info(AssocId::FUTURE).unwrap().asocmaxrxt, 5);
+    assert_eq!(
+        accepted.assoc_info(AssocId::FUTURE).unwrap().cookie_life,
+        30_000
+    );
+    accepted
+        .set_delayed_sack(
+            AssocId::FUTURE,
+            &SackInfo {
+                delay_ms: 120,
+                freq: 3,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        accepted.delayed_sack(AssocId::FUTURE).unwrap(),
+        SackInfo {
+            delay_ms: 120,
+            freq: 3
+        }
+    );
+    assert_eq!(
+        client
+            .assoc_info(AssocId::FUTURE)
+            .unwrap()
+            .number_peer_destinations,
+        1
+    );
+}
+
+#[test]
+fn bindx_zero_ports_share_ephemeral_port() {
+    if !sctp_available() {
+        return;
+    }
+    let sock = SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap();
+    let second: SocketAddr = "127.0.0.2:0".parse().unwrap();
+    sock.bindx_add(&[localhost(0), second]).unwrap();
+    let port = sock.local_addr().unwrap().port();
+    assert_ne!(port, 0);
+    let addrs = sock.local_addrs(AssocId::FUTURE).unwrap();
+    assert_eq!(addrs.len(), 2);
+    assert!(addrs.contains(&localhost(port)));
+    assert!(addrs.contains(&SocketAddr::new(second.ip(), port)));
+}
+
+#[test]
+fn reuse_address_allows_rebinding() {
+    if !sctp_available() {
+        return;
+    }
+    let first = SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap();
+    first.set_reuse_address(true).unwrap();
+    assert!(first.reuse_address().unwrap());
+    first.bind(&localhost(0)).unwrap();
+    let addr = first.local_addr().unwrap();
+    let without_reuse = SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap();
+    assert!(!without_reuse.reuse_address().unwrap());
+    assert_eq!(
+        without_reuse.bind(&addr).unwrap_err().raw_os_error(),
+        Some(98)
+    );
+    let second = SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap();
+    second.set_reuse_address(true).unwrap();
+    second.bind(&addr).unwrap();
+}
+
+#[test]
+fn reuse_port_roundtrip() {
+    if !sctp_available() {
+        return;
+    }
+    let socket = SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap();
+    socket.set_reuse_port(true).unwrap();
+    assert!(socket.reuse_port().unwrap());
+    socket.set_reuse_port(false).unwrap();
+    assert!(!socket.reuse_port().unwrap());
+    let endpoint = SctpSocket::new(Family::Ipv4, Style::OneToMany).unwrap();
+    assert!(endpoint.set_reuse_port(true).is_err());
+}
 
 /// Guards a blocking socket against protocol-level stalls: a stuck recv
 /// fails with `WouldBlock` after 10 s instead of hanging the suite.
@@ -507,6 +668,13 @@ fn multihomed_two_paths() {
     // Both sides must see both paths of the peer.
     let client_view = client.peer_addrs(AssocId::FUTURE).unwrap();
     assert_eq!(
+        client
+            .assoc_info(AssocId::FUTURE)
+            .unwrap()
+            .number_peer_destinations,
+        2
+    );
+    assert_eq!(
         client_view.len(),
         2,
         "client should see two peer paths: {client_view:?}"
@@ -522,6 +690,17 @@ fn multihomed_two_paths() {
     );
     assert!(server_view.contains(&localhost(c_port)));
     assert!(server_view.contains(&c_addr2));
+
+    let id = client.status(AssocId::FUTURE).unwrap().assoc_id;
+    assert_eq!(client.peer_addrs(id).unwrap(), client_view);
+    assert_eq!(client.local_addrs(id).unwrap().len(), 2);
+    assert_eq!(client.status(id).unwrap().state, AssocState::Established);
+    for path in &client_view {
+        assert_eq!(
+            client.peer_addr_info(id, path).unwrap().address,
+            Some(*path)
+        );
+    }
 
     // Per-path state: the primary is active; the alternate path may still
     // be unconfirmed until a heartbeat completes.

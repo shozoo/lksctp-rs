@@ -9,8 +9,8 @@ use std::io;
 use std::net::{Shutdown, SocketAddr};
 
 use crate::types::{
-    AssocId, AssocStatus, EventType, Family, InitParams, PeerAddrInfo, PeerAddrParams, RecvMsg,
-    RtoInfo, SendInfo, Style,
+    AssocId, AssocInfo, AssocStats, AssocStatus, EventType, Family, InitParams, PeerAddrInfo,
+    PeerAddrParams, RecvMsg, RtoInfo, SackInfo, SendInfo, Style,
 };
 
 pub(crate) enum Socket {}
@@ -93,6 +93,46 @@ impl Socket {
     }
 
     pub(crate) fn set_nodelay(&self, _nodelay: bool) -> io::Result<()> {
+        match *self {}
+    }
+
+    pub(crate) fn reuse_address(&self) -> io::Result<bool> {
+        match *self {}
+    }
+    pub(crate) fn set_reuse_address(&self, _enabled: bool) -> io::Result<()> {
+        match *self {}
+    }
+    pub(crate) fn reuse_port(&self) -> io::Result<bool> {
+        match *self {}
+    }
+    pub(crate) fn set_reuse_port(&self, _enabled: bool) -> io::Result<()> {
+        match *self {}
+    }
+    #[cfg(feature = "tokio")]
+    pub(crate) fn set_abort_on_close(&self) -> io::Result<()> {
+        match *self {}
+    }
+    #[cfg(feature = "tokio")]
+    pub(crate) fn is_listening(&self) -> io::Result<bool> {
+        match *self {}
+    }
+    #[cfg(feature = "tokio")]
+    pub(crate) fn style(&self) -> io::Result<Style> {
+        match *self {}
+    }
+    pub(crate) fn assoc_info(&self, _assoc_id: AssocId) -> io::Result<AssocInfo> {
+        match *self {}
+    }
+    pub(crate) fn assoc_stats(&self, _assoc_id: AssocId) -> io::Result<AssocStats> {
+        match *self {}
+    }
+    pub(crate) fn set_assoc_info(&self, _assoc_id: AssocId, _info: &AssocInfo) -> io::Result<()> {
+        match *self {}
+    }
+    pub(crate) fn delayed_sack(&self, _assoc_id: AssocId) -> io::Result<SackInfo> {
+        match *self {}
+    }
+    pub(crate) fn set_delayed_sack(&self, _assoc_id: AssocId, _info: &SackInfo) -> io::Result<()> {
         match *self {}
     }
 
