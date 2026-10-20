@@ -150,9 +150,23 @@ impl SctpSocket {
     }
 
     /// Subscribes to (or unsubscribes from) a notification class
-    /// (`SCTP_EVENT`, kernel 4.11+). Applies to future associations.
+    /// (`SCTP_EVENT`, kernel 5.0+). Applies to future associations on a
+    /// one-to-many socket; on an established one-to-one socket, it applies
+    /// to the current association.
     pub fn subscribe_event(&self, event: EventType, on: bool) -> io::Result<()> {
         self.inner.subscribe_event(event, on)
+    }
+
+    /// Changes a notification subscription for `assoc_id` (`SCTP_EVENT`).
+    /// Use [`AssocId::ALL`] on a one-to-many socket to cover existing and
+    /// future associations, or pass a specific association ID.
+    pub fn subscribe_event_for(
+        &self,
+        assoc_id: AssocId,
+        event: EventType,
+        on: bool,
+    ) -> io::Result<()> {
+        self.inner.subscribe_event_for(assoc_id, event, on)
     }
 
     /// Subscribes to several notification classes at once.
@@ -390,11 +404,14 @@ impl SctpSocket {
         })
     }
 
-    /// Shuts down the association(s) on this socket (`shutdown(2)`).
+    /// Shuts down a one-to-one association (`shutdown(2)`). Returns
+    /// [`io::ErrorKind::Unsupported`] for one-to-many sockets.
     ///
     /// `Shutdown::Write` triggers the SCTP graceful shutdown handshake. For
     /// a graceful shutdown of a *single* association on a one-to-many
     /// socket, send with [`SendFlags::EOF`](crate::SendFlags::EOF) instead.
+    /// Dropping a one-to-many socket closes all its associations.
+    /// `Shutdown::Read` affects local reads only; it sends no SCTP shutdown.
     ///
     /// Note: the *initiator* does not observe handshake completion as a
     /// zero-length read (the kernel grants EOF semantics only to the peer

@@ -47,6 +47,11 @@ impl Socket {
         match *self {}
     }
 
+    #[cfg(feature = "tokio")]
+    pub(crate) fn accept_nonblocking(&self) -> io::Result<(Socket, SocketAddr)> {
+        match *self {}
+    }
+
     pub(crate) fn connect(&self, _addr: &SocketAddr) -> io::Result<()> {
         match *self {}
     }
@@ -77,6 +82,15 @@ impl Socket {
     }
 
     pub(crate) fn subscribe_event(&self, _event: EventType, _on: bool) -> io::Result<()> {
+        match *self {}
+    }
+
+    pub(crate) fn subscribe_event_for(
+        &self,
+        _assoc_id: AssocId,
+        _event: EventType,
+        _on: bool,
+    ) -> io::Result<()> {
         match *self {}
     }
 
@@ -116,7 +130,6 @@ impl Socket {
     pub(crate) fn is_listening(&self) -> io::Result<bool> {
         match *self {}
     }
-    #[cfg(feature = "tokio")]
     pub(crate) fn style(&self) -> io::Result<Style> {
         match *self {}
     }
@@ -234,6 +247,11 @@ impl Socket {
     }
 
     pub(crate) fn peeloff(&self, _assoc_id: AssocId) -> io::Result<Socket> {
+        match *self {}
+    }
+
+    #[cfg(feature = "tokio")]
+    pub(crate) fn peeloff_nonblocking(&self, _assoc_id: AssocId) -> io::Result<Socket> {
         match *self {}
     }
 

@@ -35,6 +35,10 @@ fn cvt_size(ret: libc::ssize_t) -> io::Result<usize> {
     }
 }
 
+fn connectx_id_is_ready(error: &io::Error, flags: i32) -> bool {
+    error.raw_os_error() == Some(libc::EINPROGRESS) && flags & libc::O_NONBLOCK != 0
+}
+
 /// Control buffer for sending one SCTP_SNDINFO cmsg.
 const SND_CMSG_SPACE: usize = cmsg::space(size_of::<sys::sctp_sndinfo>());
 
@@ -162,27 +166,7 @@ impl Socket {
     }
 
     pub(crate) fn bindx_add(&self, addrs: &[SocketAddr]) -> io::Result<()> {
-        if addrs.len() > 1 && addrs[0].port() == 0 {
-            if addrs.iter().any(|addr| addr.port() != 0) {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "all addresses must use port 0 or the same explicit port",
-                ));
-            }
-            self.bindx(&addrs[..1], sys::SCTP_SOCKOPT_BINDX_ADD)?;
-            let port = self.local_addr()?.port();
-            let rest: Vec<_> = addrs[1..]
-                .iter()
-                .map(|addr| {
-                    let mut addr = *addr;
-                    addr.set_port(port);
-                    addr
-                })
-                .collect();
-            self.bindx(&rest, sys::SCTP_SOCKOPT_BINDX_ADD)
-        } else {
-            self.bindx(addrs, sys::SCTP_SOCKOPT_BINDX_ADD)
-        }
+        self.bindx(addrs, sys::SCTP_SOCKOPT_BINDX_ADD)
     }
 
     pub(crate) fn bindx_remove(&self, addrs: &[SocketAddr]) -> io::Result<()> {
@@ -195,6 +179,15 @@ impl Socket {
     }
 
     pub(crate) fn accept(&self) -> io::Result<(Socket, SocketAddr)> {
+        self.accept_with_flags(libc::SOCK_CLOEXEC)
+    }
+
+    #[cfg(feature = "tokio")]
+    pub(crate) fn accept_nonblocking(&self) -> io::Result<(Socket, SocketAddr)> {
+        self.accept_with_flags(libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK)
+    }
+
+    fn accept_with_flags(&self, flags: i32) -> io::Result<(Socket, SocketAddr)> {
         let mut storage = [0u8; 128];
         let mut len = storage.len() as libc::socklen_t;
         let fd = cvt(unsafe {
@@ -202,7 +195,7 @@ impl Socket {
                 self.raw(),
                 storage.as_mut_ptr() as *mut libc::sockaddr,
                 &mut len,
-                libc::SOCK_CLOEXEC,
+                flags,
             )
         })?;
         let sock = Socket {
@@ -260,10 +253,12 @@ impl Socket {
         }
         let e = io::Error::last_os_error();
         if e.raw_os_error() == Some(libc::EINPROGRESS) {
-            Ok(AssocId(param.assoc_id))
-        } else {
-            Err(e)
+            let flags = cvt(unsafe { libc::fcntl(self.raw(), libc::F_GETFL) })?;
+            if connectx_id_is_ready(&e, flags) {
+                return Ok(AssocId(param.assoc_id));
+            }
         }
+        Err(e)
     }
 
     // -- data path ----------------------------------------------------------
@@ -437,8 +432,17 @@ impl Socket {
     }
 
     pub(crate) fn subscribe_event(&self, event: EventType, on: bool) -> io::Result<()> {
+        self.subscribe_event_for(AssocId::FUTURE, event, on)
+    }
+
+    pub(crate) fn subscribe_event_for(
+        &self,
+        assoc_id: AssocId,
+        event: EventType,
+        on: bool,
+    ) -> io::Result<()> {
         let ev = sys::sctp_event {
-            se_assoc_id: sys::SCTP_FUTURE_ASSOC,
+            se_assoc_id: assoc_id.0,
             se_type: event.to_raw(),
             se_on: on as u8,
         };
@@ -496,7 +500,6 @@ impl Socket {
         Ok(value != 0)
     }
 
-    #[cfg(feature = "tokio")]
     pub(crate) fn style(&self) -> io::Result<Style> {
         let kind: i32 = self.getsockopt(libc::SOL_SOCKET, libc::SO_TYPE)?;
         match kind {
@@ -504,7 +507,7 @@ impl Socket {
             libc::SOCK_SEQPACKET => Ok(Style::OneToMany),
             _ => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "socket is not SCTP",
+                "socket type is neither SOCK_STREAM nor SOCK_SEQPACKET",
             )),
         }
     }
@@ -773,27 +776,43 @@ impl Socket {
     }
 
     fn getaddrs(&self, assoc_id: AssocId, opt: i32) -> io::Result<Vec<SocketAddr>> {
-        // Header (8 bytes) followed by packed sockaddrs. Sized for a very
-        // multi-homed endpoint: 64 IPv6 addresses.
-        const BUF_LEN: usize = 8 + 64 * addr::SOCKADDR_IN6_LEN;
-        let mut buf = [0u8; BUF_LEN];
-        buf[0..4].copy_from_slice(&assoc_id.0.to_ne_bytes());
-        let mut len = BUF_LEN as libc::socklen_t;
-        cvt(unsafe {
-            libc::getsockopt(
-                self.raw(),
-                sys::SOL_SCTP,
-                opt,
-                buf.as_mut_ptr() as *mut libc::c_void,
-                &mut len,
-            )
-        })?;
-        let count = u32::from_ne_bytes(buf[4..8].try_into().unwrap()) as usize;
-        // Don't slice by the returned optlen: SCTP_GET_PEER_ADDRS includes
-        // the 8-byte header in it but SCTP_GET_LOCAL_ADDRS does not (the
-        // kernel keeps this asymmetry for ABI compatibility — see the XXX
-        // comment in sctp_getsockopt_local_addrs). addr_num is authoritative.
-        Ok(addr::read_addr_list(&buf[8..], count))
+        self.getaddrs_with_capacity(assoc_id, opt, 8 + 64 * addr::SOCKADDR_IN6_LEN)
+    }
+
+    fn getaddrs_with_capacity(
+        &self,
+        assoc_id: AssocId,
+        opt: i32,
+        initial_capacity: usize,
+    ) -> io::Result<Vec<SocketAddr>> {
+        const MAX_CAPACITY: usize = 4 * 1024 * 1024;
+        let mut capacity = initial_capacity.max(8);
+        loop {
+            let mut buf = vec![0u8; capacity];
+            buf[0..4].copy_from_slice(&assoc_id.0.to_ne_bytes());
+            let mut len = capacity as libc::socklen_t;
+            let result = cvt(unsafe {
+                libc::getsockopt(
+                    self.raw(),
+                    sys::SOL_SCTP,
+                    opt,
+                    buf.as_mut_ptr() as *mut libc::c_void,
+                    &mut len,
+                )
+            });
+            match result {
+                Ok(_) => {
+                    let count = u32::from_ne_bytes(buf[4..8].try_into().unwrap()) as usize;
+                    // GET_LOCAL_ADDRS omits the header from optlen, unlike GET_PEER_ADDRS.
+                    // The returned address count is authoritative for both.
+                    return Ok(addr::read_addr_list(&buf[8..], count));
+                }
+                Err(e) if e.raw_os_error() == Some(libc::ENOMEM) && capacity < MAX_CAPACITY => {
+                    capacity = (capacity * 2).min(MAX_CAPACITY);
+                }
+                Err(e) => return Err(e),
+            }
+        }
     }
 
     pub(crate) fn local_addrs(&self, assoc_id: AssocId) -> io::Result<Vec<SocketAddr>> {
@@ -807,45 +826,41 @@ impl Socket {
     // -- association management ----------------------------------------------
 
     pub(crate) fn peeloff(&self, assoc_id: AssocId) -> io::Result<Socket> {
-        // Prefer the flags variant (kernel 4.15+) for an atomic CLOEXEC.
+        self.peeloff_with_flags(assoc_id, libc::SOCK_CLOEXEC)
+    }
+
+    #[cfg(feature = "tokio")]
+    pub(crate) fn peeloff_nonblocking(&self, assoc_id: AssocId) -> io::Result<Socket> {
+        self.peeloff_with_flags(assoc_id, libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK)
+    }
+
+    fn peeloff_with_flags(&self, assoc_id: AssocId, flags: i32) -> io::Result<Socket> {
         let mut flags_arg = sys::sctp_peeloff_flags_arg_t {
             p_arg: sys::sctp_peeloff_arg_t {
                 associd: assoc_id.0,
                 sd: -1,
             },
-            flags: libc::SOCK_CLOEXEC as u32,
+            flags: flags as u32,
         };
-        let fd = match self.getsockopt_inout(
+        self.getsockopt_inout(
             sys::SOL_SCTP,
             sys::SCTP_SOCKOPT_PEELOFF_FLAGS,
             &mut flags_arg,
-        ) {
-            Ok(()) => unsafe { OwnedFd::from_raw_fd(flags_arg.p_arg.sd) },
-            // Pre-4.15 kernels: fall back to the plain variant and set
-            // CLOEXEC after the fact (non-atomic, best effort).
-            Err(e)
-                if e.raw_os_error() == Some(libc::ENOPROTOOPT)
-                    || e.raw_os_error() == Some(libc::EOPNOTSUPP) =>
-            {
-                let mut arg = sys::sctp_peeloff_arg_t {
-                    associd: assoc_id.0,
-                    sd: -1,
-                };
-                self.getsockopt_inout(sys::SOL_SCTP, sys::SCTP_SOCKOPT_PEELOFF, &mut arg)?;
-                // Take ownership before anything can fail, so the fd cannot
-                // leak on the error path.
-                let owned = unsafe { OwnedFd::from_raw_fd(arg.sd) };
-                cvt(unsafe { libc::fcntl(owned.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) })?;
-                owned
-            }
-            Err(e) => return Err(e),
+        )?;
+        let sock = Socket {
+            fd: unsafe { OwnedFd::from_raw_fd(flags_arg.p_arg.sd) },
         };
-        let sock = Socket { fd };
         sock.enable_rcvinfo()?;
         Ok(sock)
     }
 
     pub(crate) fn shutdown(&self, how: Shutdown) -> io::Result<()> {
+        if self.style()? == Style::OneToMany {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "shutdown(2) does not close one-to-many SCTP associations; use SCTP_EOF or close the socket",
+            ));
+        }
         let how = match how {
             Shutdown::Read => libc::SHUT_RD,
             Shutdown::Write => libc::SHUT_WR,
@@ -881,5 +896,51 @@ impl std::fmt::Debug for Socket {
         f.debug_struct("SctpSocket")
             .field("fd", &self.raw())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn connectx_in_progress_requires_nonblocking_mode() {
+        let in_progress = io::Error::from_raw_os_error(libc::EINPROGRESS);
+        assert!(!connectx_id_is_ready(&in_progress, 0));
+        assert!(connectx_id_is_ready(&in_progress, libc::O_NONBLOCK));
+        let refused = io::Error::from_raw_os_error(libc::ECONNREFUSED);
+        assert!(!connectx_id_is_ready(&refused, libc::O_NONBLOCK));
+    }
+
+    #[test]
+    fn address_query_grows_after_enomem() {
+        let Ok(sock) = Socket::new(Family::Ipv4, Style::OneToOne) else {
+            return; // Kernel SCTP is unavailable.
+        };
+        let first: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let second: SocketAddr = "127.0.0.2:0".parse().unwrap();
+        sock.bindx_add(&[first, second]).unwrap();
+        let port = sock.local_addr().unwrap().port();
+        let addrs = sock
+            .getaddrs_with_capacity(AssocId::FUTURE, sys::SCTP_GET_LOCAL_ADDRS, 8)
+            .unwrap();
+        assert_eq!(addrs.len(), 2);
+        assert!(addrs.contains(&SocketAddr::new(first.ip(), port)));
+        assert!(addrs.contains(&SocketAddr::new(second.ip(), port)));
+    }
+
+    #[cfg(feature = "tokio")]
+    #[test]
+    fn async_accept_is_nonblocking() {
+        let Ok(listener) = Socket::new(Family::Ipv4, Style::OneToOne) else {
+            return; // Kernel SCTP is unavailable.
+        };
+        listener.bind(&"127.0.0.1:0".parse().unwrap()).unwrap();
+        listener.listen(1).unwrap();
+        let client = Socket::new(Family::Ipv4, Style::OneToOne).unwrap();
+        client.connectx(&[listener.local_addr().unwrap()]).unwrap();
+        let (accepted, _) = listener.accept_nonblocking().unwrap();
+        let flags = cvt(unsafe { libc::fcntl(accepted.raw(), libc::F_GETFL) }).unwrap();
+        assert_ne!(flags & libc::O_NONBLOCK, 0);
     }
 }

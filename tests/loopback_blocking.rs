@@ -11,7 +11,7 @@
 
 mod common;
 
-use std::net::SocketAddr;
+use std::net::{Shutdown, SocketAddr};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -145,6 +145,85 @@ fn bindx_zero_ports_share_ephemeral_port() {
     assert_eq!(addrs.len(), 2);
     assert!(addrs.contains(&localhost(port)));
     assert!(addrs.contains(&SocketAddr::new(second.ip(), port)));
+}
+
+#[test]
+fn existing_association_event_subscription_and_endpoint_shutdown() {
+    if !sctp_available() {
+        return;
+    }
+    let server = guarded(SctpSocket::new(Family::Ipv4, Style::OneToMany).unwrap());
+    server
+        .subscribe_event(EventType::AssocChange, true)
+        .unwrap();
+    server.bind(&localhost(0)).unwrap();
+    server.listen(8).unwrap();
+    let client = guarded(SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap());
+    client.connectx(&[server.local_addr().unwrap()]).unwrap();
+    assert_eq!(
+        server.shutdown(Shutdown::Both).unwrap_err().kind(),
+        std::io::ErrorKind::Unsupported
+    );
+    let mut buf = [0u8; 64];
+    let assoc_id = loop {
+        if let RecvMsg::Notification(Notification::AssocChange(change)) =
+            server.recv_msg(&mut buf).unwrap()
+        {
+            assert_eq!(change.state, AssocChangeState::CommUp);
+            break change.assoc_id;
+        }
+    };
+    server
+        .subscribe_event_for(assoc_id, EventType::SenderDry, true)
+        .unwrap();
+    server
+        .send_msg(
+            b"ack",
+            &SendInfo {
+                assoc_id,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        client.recv_msg(&mut buf).unwrap(),
+        RecvMsg::Data { .. }
+    ));
+    loop {
+        if let RecvMsg::Notification(Notification::SenderDry(event)) =
+            server.recv_msg(&mut buf).unwrap()
+        {
+            assert_eq!(event.assoc_id, assoc_id);
+            break;
+        }
+    }
+    server
+        .subscribe_event_for(AssocId::ALL, EventType::SenderDry, false)
+        .unwrap();
+    server
+        .subscribe_event_for(AssocId::ALL, EventType::SenderDry, true)
+        .unwrap();
+    server
+        .send_msg(
+            b"again",
+            &SendInfo {
+                assoc_id,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        client.recv_msg(&mut buf).unwrap(),
+        RecvMsg::Data { .. }
+    ));
+    loop {
+        if let RecvMsg::Notification(Notification::SenderDry(event)) =
+            server.recv_msg(&mut buf).unwrap()
+        {
+            assert_eq!(event.assoc_id, assoc_id);
+            break;
+        }
+    }
 }
 
 #[test]
