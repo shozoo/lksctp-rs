@@ -13,10 +13,458 @@ use std::net::Shutdown;
 
 use common::{diameter, localhost, m3ua, recv_data, sctp_available, t};
 use lksctp::{
-    AssocChangeState, AssocId, AssocState, EventType, Family, InitParams, Notification,
-    PeerAddrState, Ppid, RecvMsg, SctpEndpoint, SctpListener, SctpSocket, SctpStream, SendFlags,
-    SendInfo, Style,
+    AssocChangeState, AssocId, AssocInfo, AssocState, EventType, Family, InitParams, Notification,
+    PeerAddrParams, PeerAddrState, Ppid, RecvMsg, RtoInfo, SackInfo, SctpEndpoint, SctpListener,
+    SctpSocket, SctpStream, SendFlags, SendInfo, Style,
 };
+
+#[tokio::test]
+async fn configured_socket_conversion_and_sender_dry() {
+    if !sctp_available() {
+        return;
+    }
+    let raw = SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap();
+    raw.set_assoc_info(
+        AssocId::FUTURE,
+        &AssocInfo {
+            asocmaxrxt: 7,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    raw.set_delayed_sack(
+        AssocId::FUTURE,
+        &SackInfo {
+            delay_ms: 100,
+            freq: 2,
+        },
+    )
+    .unwrap();
+    raw.set_rto_info(
+        AssocId::FUTURE,
+        &RtoInfo {
+            initial: 1500,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    raw.bind(&localhost(0)).unwrap();
+    raw.listen(8).unwrap();
+    let listener = SctpListener::from_socket(raw).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let destinations = [addr];
+    let client = SctpStream::connectx_from_socket(
+        SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap(),
+        &destinations,
+    );
+    let (client, accepted) = tokio::join!(t(client), t(listener.accept()));
+    let client = client.unwrap();
+    let (server, _) = accepted.unwrap();
+    assert_eq!(server.assoc_info(AssocId::FUTURE).unwrap().asocmaxrxt, 7);
+    assert_eq!(server.delayed_sack(AssocId::FUTURE).unwrap().freq, 2);
+    assert_eq!(server.rto_info(AssocId::FUTURE).unwrap().initial, 1500);
+    server
+        .set_assoc_info(
+            AssocId::FUTURE,
+            &AssocInfo {
+                asocmaxrxt: 5,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    server
+        .set_delayed_sack(
+            AssocId::FUTURE,
+            &SackInfo {
+                delay_ms: 120,
+                freq: 3,
+            },
+        )
+        .unwrap();
+    assert_eq!(server.assoc_info(AssocId::FUTURE).unwrap().asocmaxrxt, 5);
+    assert_eq!(server.delayed_sack(AssocId::FUTURE).unwrap().freq, 3);
+    client.subscribe_event(EventType::SenderDry, true).unwrap();
+    client
+        .send_msg(b"ack me", &SendInfo::default())
+        .await
+        .unwrap();
+    let mut buf = [0u8; 64];
+    let _ = t(server.recv_msg(&mut buf)).await.unwrap();
+    loop {
+        if let RecvMsg::Notification(Notification::SenderDry(_)) =
+            t(client.recv_msg(&mut buf)).await.unwrap()
+        {
+            break;
+        }
+    }
+}
+
+#[tokio::test]
+async fn endpoint_from_configured_socket() {
+    if !sctp_available() {
+        return;
+    }
+    let raw = SctpSocket::new(Family::Ipv4, Style::OneToMany).unwrap();
+    raw.set_reuse_address(true).unwrap();
+    raw.bind(&localhost(0)).unwrap();
+    let endpoint = SctpEndpoint::from_socket(raw).unwrap();
+    assert!(endpoint.reuse_address().unwrap());
+    assert_ne!(endpoint.local_addr().unwrap().port(), 0);
+    endpoint
+        .set_assoc_info(
+            AssocId::FUTURE,
+            &AssocInfo {
+                asocmaxrxt: 6,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    endpoint
+        .set_delayed_sack(
+            AssocId::FUTURE,
+            &SackInfo {
+                delay_ms: 100,
+                freq: 2,
+            },
+        )
+        .unwrap();
+    assert_eq!(endpoint.assoc_info(AssocId::FUTURE).unwrap().asocmaxrxt, 6);
+    assert_eq!(endpoint.delayed_sack(AssocId::FUTURE).unwrap().freq, 2);
+    let built = SctpEndpoint::builder(Family::Ipv4)
+        .unwrap()
+        .reuse_address(true)
+        .unwrap()
+        .build()
+        .unwrap();
+    assert!(built.reuse_address().unwrap());
+}
+
+#[tokio::test]
+async fn socket_conversion_rejects_wrong_state_or_style() {
+    if !sctp_available() {
+        return;
+    }
+    let stream_socket = SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap();
+    assert_eq!(
+        SctpListener::from_socket(stream_socket).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+    let endpoint_socket = SctpSocket::new(Family::Ipv4, Style::OneToMany).unwrap();
+    assert_eq!(
+        SctpListener::from_socket(endpoint_socket)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+    let stream_socket = SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap();
+    assert_eq!(
+        SctpEndpoint::from_socket(stream_socket).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+    let endpoint_socket = SctpSocket::new(Family::Ipv4, Style::OneToMany).unwrap();
+    assert_eq!(
+        SctpStream::connectx_from_socket(endpoint_socket, &[localhost(1)])
+            .await
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+}
+
+#[tokio::test]
+async fn builder_association_options() {
+    if !sctp_available() {
+        return;
+    }
+    let listener = SctpListener::builder(Family::Ipv4)
+        .unwrap()
+        .reuse_address(true)
+        .unwrap()
+        .send_buffer_size(16384)
+        .unwrap()
+        .nodelay(true)
+        .unwrap()
+        .rto_info(&RtoInfo {
+            initial: 1500,
+            ..Default::default()
+        })
+        .unwrap()
+        .peer_addr_params(&PeerAddrParams {
+            path_max_rxt: 4,
+            ..Default::default()
+        })
+        .unwrap()
+        .delayed_sack(&SackInfo {
+            delay_ms: 100,
+            freq: 2,
+        })
+        .unwrap()
+        .assoc_info(&AssocInfo {
+            asocmaxrxt: 6,
+            ..Default::default()
+        })
+        .unwrap()
+        .bindx(&[localhost(0)])
+        .unwrap()
+        .listen(8)
+        .unwrap();
+    assert!(listener.reuse_address().unwrap());
+    assert!(listener.nodelay().unwrap());
+    assert!(listener.send_buffer_size().unwrap() >= 16384);
+    let dest = [listener.local_addr().unwrap()];
+    let client = SctpStream::builder(Family::Ipv4)
+        .unwrap()
+        .reuse_address(true)
+        .unwrap()
+        .rto_info(&RtoInfo {
+            initial: 1400,
+            ..Default::default()
+        })
+        .unwrap()
+        .peer_addr_params(&PeerAddrParams {
+            path_max_rxt: 5,
+            ..Default::default()
+        })
+        .unwrap()
+        .delayed_sack(&SackInfo {
+            delay_ms: 120,
+            freq: 3,
+        })
+        .unwrap()
+        .assoc_info(&AssocInfo {
+            asocmaxrxt: 7,
+            ..Default::default()
+        })
+        .unwrap()
+        .connectx(&dest);
+    let (client, accepted) = tokio::join!(t(client), t(listener.accept()));
+    let client = client.unwrap();
+    let (server, _) = accepted.unwrap();
+    assert!(client.reuse_address().unwrap());
+    assert_eq!(client.rto_info(AssocId::FUTURE).unwrap().initial, 1400);
+    assert_eq!(
+        client
+            .peer_addr_params(AssocId::FUTURE, None)
+            .unwrap()
+            .path_max_rxt,
+        5
+    );
+    assert_eq!(client.delayed_sack(AssocId::FUTURE).unwrap().freq, 3);
+    assert_eq!(client.assoc_info(AssocId::FUTURE).unwrap().asocmaxrxt, 7);
+    assert_eq!(server.rto_info(AssocId::FUTURE).unwrap().initial, 1500);
+    assert_eq!(
+        server
+            .peer_addr_params(AssocId::FUTURE, None)
+            .unwrap()
+            .path_max_rxt,
+        4
+    );
+    assert_eq!(server.delayed_sack(AssocId::FUTURE).unwrap().freq, 2);
+    assert_eq!(server.assoc_info(AssocId::FUTURE).unwrap().asocmaxrxt, 6);
+}
+
+#[tokio::test]
+async fn association_stats_count_data_and_sacks() {
+    if !sctp_available() {
+        return;
+    }
+    let listener = SctpListener::bind(localhost(0)).unwrap();
+    let addr = listener.local_addr().unwrap();
+    let client = SctpStream::connect(addr);
+    let (client, accepted) = tokio::join!(t(client), t(listener.accept()));
+    let client = client.unwrap();
+    let (server, _) = accepted.unwrap();
+    server
+        .set_delayed_sack(
+            AssocId::FUTURE,
+            &SackInfo {
+                delay_ms: 0,
+                freq: 1,
+            },
+        )
+        .unwrap();
+    let before_client = client.assoc_stats(AssocId::FUTURE).unwrap();
+    let before_server = server.assoc_stats(AssocId::FUTURE).unwrap();
+    for index in 0..4u8 {
+        client
+            .send_msg(&[index], &SendInfo::default())
+            .await
+            .unwrap();
+    }
+    let mut buf = [0u8; 64];
+    for index in 0..4u8 {
+        let (len, _) = recv_data(&server, &mut buf).await;
+        assert_eq!((len, buf[0]), (1, index));
+    }
+    client
+        .send_msg(
+            &[4],
+            &SendInfo {
+                flags: SendFlags::UNORDERED,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let (len, _) = recv_data(&server, &mut buf).await;
+    assert_eq!((len, buf[0]), (1, 4));
+    let after_client = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let stats = client.assoc_stats(AssocId::FUTURE).unwrap();
+            if stats.sacks_received > before_client.sacks_received {
+                break stats;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let after_server = server.assoc_stats(AssocId::FUTURE).unwrap();
+    assert!(after_client.ordered_data_chunks_sent >= before_client.ordered_data_chunks_sent + 4);
+    assert!(
+        after_server.ordered_data_chunks_received >= before_server.ordered_data_chunks_received + 4
+    );
+    assert!(after_server.sacks_sent > before_server.sacks_sent);
+    assert!(after_client.unordered_data_chunks_sent > before_client.unordered_data_chunks_sent);
+    assert!(
+        after_server.unordered_data_chunks_received > before_server.unordered_data_chunks_received
+    );
+    assert!(after_client.packets_sent > before_client.packets_sent);
+    assert!(after_server.packets_received > before_server.packets_received);
+}
+
+#[tokio::test]
+async fn reuse_address_reconnects_fixed_source_port() {
+    if !sctp_available() {
+        return;
+    }
+    let listener = SctpListener::bind(localhost(0)).unwrap();
+    let dest = [listener.local_addr().unwrap()];
+    let raw = SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap();
+    raw.set_reuse_address(true).unwrap();
+    raw.bind(&localhost(0)).unwrap();
+    let source = raw.local_addr().unwrap();
+    let client = SctpStream::connectx_from_socket(raw, &dest);
+    let (client, accepted) = tokio::join!(t(client), t(listener.accept()));
+    let client = client.unwrap();
+    let (server, _) = accepted.unwrap();
+    client.abort().unwrap();
+    drop(server);
+    let raw = SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap();
+    raw.set_reuse_address(true).unwrap();
+    raw.bind(&source).unwrap();
+    let client = SctpStream::connectx_from_socket(raw, &dest);
+    let (client, accepted) = tokio::join!(t(client), t(listener.accept()));
+    assert!(client.is_ok());
+    assert!(accepted.is_ok());
+}
+
+#[tokio::test]
+async fn stream_abort_reports_comm_lost() {
+    if !sctp_available() {
+        return;
+    }
+    let listener = SctpListener::builder(Family::Ipv4)
+        .unwrap()
+        .recv_buffer_size(4096)
+        .unwrap()
+        .bindx(&[localhost(0)])
+        .unwrap()
+        .listen(8)
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    let client = SctpStream::connect(addr);
+    let (client, accepted) = tokio::join!(t(client), t(listener.accept()));
+    let client = client.unwrap();
+    let (server, _) = accepted.unwrap();
+    server
+        .subscribe_event(EventType::AssocChange, true)
+        .unwrap();
+    client.set_send_buffer_size(4096).unwrap();
+    let mut saturated = false;
+    for _ in 0..4096 {
+        match tokio::time::timeout(
+            std::time::Duration::from_millis(20),
+            client.send_msg(&[0u8; 512], &SendInfo::default()),
+        )
+        .await
+        {
+            Err(_) => {
+                saturated = true;
+                break;
+            }
+            Ok(result) => {
+                result.unwrap();
+            }
+        }
+    }
+    assert!(saturated, "send buffer did not saturate");
+    client.abort().unwrap();
+    let mut buf = [0u8; 64];
+    loop {
+        match t(server.recv_msg(&mut buf)).await.unwrap() {
+            RecvMsg::Notification(Notification::AssocChange(ac))
+                if ac.state == AssocChangeState::CommLost =>
+            {
+                break;
+            }
+            _ => {}
+        }
+    }
+}
+
+#[tokio::test]
+async fn stream_multihomed_address_queries() {
+    if !sctp_available() {
+        return;
+    }
+    let raw = SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap();
+    raw.bindx_add(&[localhost(0), "127.0.0.2:0".parse().unwrap()])
+        .unwrap();
+    let port = raw.local_addr().unwrap().port();
+    raw.listen(8).unwrap();
+    let listener = SctpListener::from_socket(raw).unwrap();
+    let client_raw = SctpSocket::new(Family::Ipv4, Style::OneToOne).unwrap();
+    client_raw
+        .bindx_add(&[localhost(0), "127.0.0.2:0".parse().unwrap()])
+        .unwrap();
+    let destinations = [
+        localhost(port),
+        format!("127.0.0.2:{port}").parse().unwrap(),
+    ];
+    let client = SctpStream::connectx_from_socket(client_raw, &destinations);
+    let (client, accepted) = tokio::join!(t(client), t(listener.accept()));
+    let client = client.unwrap();
+    let (server, _) = accepted.unwrap();
+    for stream in [&client, &server] {
+        let status = stream.status(AssocId::FUTURE).unwrap();
+        assert_eq!(
+            stream.status(status.assoc_id).unwrap().state,
+            AssocState::Established
+        );
+        let peers = stream.peer_addrs(AssocId::FUTURE).unwrap();
+        assert_eq!(peers.len(), 2);
+        assert_eq!(stream.peer_addrs(status.assoc_id).unwrap(), peers);
+        assert_eq!(stream.local_addrs(AssocId::FUTURE).unwrap().len(), 2);
+        assert_eq!(stream.local_addrs(status.assoc_id).unwrap().len(), 2);
+        for peer in &peers {
+            assert_eq!(
+                stream
+                    .peer_addr_info(AssocId::FUTURE, peer)
+                    .unwrap()
+                    .address,
+                Some(*peer)
+            );
+            assert_eq!(
+                stream
+                    .peer_addr_info(status.assoc_id, peer)
+                    .unwrap()
+                    .address,
+                Some(*peer)
+            );
+        }
+    }
+}
 
 #[tokio::test]
 async fn one_to_one_echo_with_metadata() {
@@ -335,6 +783,7 @@ async fn one_to_many_explicit_connectx() {
         }
     }
     assert_eq!(client.status(assoc).unwrap().state, AssocState::Established);
+    assert!(client.assoc_stats(assoc).unwrap().control_chunks_sent > 0);
 }
 
 #[tokio::test]

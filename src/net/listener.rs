@@ -7,7 +7,9 @@ use crate::EventType;
 use crate::net::common::{self, Io};
 use crate::net::stream::SctpStream;
 use crate::socket::SctpSocket;
-use crate::types::{Family, InitParams, Style};
+use crate::types::{
+    AssocId, AssocInfo, Family, InitParams, PeerAddrParams, RtoInfo, SackInfo, Style,
+};
 
 /// A one-to-one (`SOCK_STREAM`) SCTP listener, integrated with the tokio
 /// reactor — the SCTP counterpart of [`tokio::net::TcpListener`].
@@ -20,6 +22,19 @@ pub struct SctpListener {
 }
 
 impl SctpListener {
+    /// Registers an already listening one-to-one socket with Tokio.
+    pub fn from_socket(sock: SctpSocket) -> io::Result<SctpListener> {
+        if sock.inner.style()? != Style::OneToOne || !sock.inner.is_listening()? {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "socket is not listening",
+            ));
+        }
+        Ok(SctpListener {
+            io: common::register(sock.inner)?,
+        })
+    }
+
     /// Listens on a single address with default parameters and a backlog of
     /// 128. See [`ListenerBuilder`] for multi-homing and tuning.
     pub fn bind(addr: SocketAddr) -> io::Result<SctpListener> {
@@ -54,6 +69,30 @@ pub struct ListenerBuilder {
 }
 
 impl ListenerBuilder {
+    /// Sets future-association RTO values.
+    pub fn rto_info(self, info: &RtoInfo) -> io::Result<ListenerBuilder> {
+        self.sock.set_rto_info(AssocId::FUTURE, info)?;
+        Ok(self)
+    }
+
+    /// Sets future-association peer address defaults.
+    pub fn peer_addr_params(self, params: &PeerAddrParams) -> io::Result<ListenerBuilder> {
+        self.sock
+            .set_peer_addr_params(AssocId::FUTURE, None, params)?;
+        Ok(self)
+    }
+
+    /// Sets future-association delayed SACK parameters.
+    pub fn delayed_sack(self, info: &SackInfo) -> io::Result<ListenerBuilder> {
+        self.sock.set_delayed_sack(AssocId::FUTURE, info)?;
+        Ok(self)
+    }
+
+    /// Sets future-association retransmission parameters.
+    pub fn assoc_info(self, info: &AssocInfo) -> io::Result<ListenerBuilder> {
+        self.sock.set_assoc_info(AssocId::FUTURE, info)?;
+        Ok(self)
+    }
     /// Binds local addresses (all sharing one port) for a multi-homed
     /// endpoint.
     pub fn bindx(self, addrs: &[SocketAddr]) -> io::Result<ListenerBuilder> {
@@ -79,11 +118,27 @@ impl ListenerBuilder {
         Ok(self)
     }
 
+    /// Sets the send buffer size (`SO_SNDBUF`).
+    pub fn send_buffer_size(self, size: usize) -> io::Result<ListenerBuilder> {
+        self.sock.set_send_buffer_size(size)?;
+        Ok(self)
+    }
+
+    /// Sets `SCTP_NODELAY`.
+    pub fn nodelay(self, enabled: bool) -> io::Result<ListenerBuilder> {
+        self.sock.set_nodelay(enabled)?;
+        Ok(self)
+    }
+
+    /// Sets `SO_REUSEADDR` before binding.
+    pub fn reuse_address(self, enabled: bool) -> io::Result<ListenerBuilder> {
+        self.sock.set_reuse_address(enabled)?;
+        Ok(self)
+    }
+
     /// Starts listening and registers with the tokio reactor.
     pub fn listen(self, backlog: i32) -> io::Result<SctpListener> {
         self.sock.listen(backlog)?;
-        Ok(SctpListener {
-            io: common::register(self.sock.inner)?,
-        })
+        SctpListener::from_socket(self.sock)
     }
 }

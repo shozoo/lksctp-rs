@@ -5,7 +5,10 @@ use std::net::{Shutdown, SocketAddr};
 
 use crate::net::common::{self, Io};
 use crate::socket::SctpSocket;
-use crate::types::{Family, InitParams, RecvMsg, SendInfo, Style};
+use crate::types::{
+    AssocId, AssocInfo, Family, InitParams, PeerAddrParams, RecvMsg, RtoInfo, SackInfo, SendInfo,
+    Style,
+};
 use crate::{EventType, imp};
 
 /// An established one-to-one (`SOCK_STREAM`) SCTP association, integrated
@@ -28,6 +31,25 @@ pub struct SctpStream {
 }
 
 impl SctpStream {
+    /// Connects an existing socket to a peer and waits for `CommUp`.
+    /// The `AssocChange` subscription remains enabled after connection.
+    pub async fn connectx_from_socket(
+        sock: SctpSocket,
+        addrs: &[SocketAddr],
+    ) -> io::Result<SctpStream> {
+        if sock.inner.style()? != Style::OneToOne {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "socket is not one-to-one",
+            ));
+        }
+        sock.subscribe_event(EventType::AssocChange, true)?;
+        let io = common::register(sock.inner)?;
+        common::sock(&io).connectx(addrs)?;
+        common::established(&io).await?;
+        Ok(SctpStream { io })
+    }
+
     /// Connects to a peer with default parameters. See [`StreamBuilder`]
     /// for local binding, INIT parameters, and multi-homed connects.
     pub async fn connect(addr: SocketAddr) -> io::Result<SctpStream> {
@@ -61,6 +83,16 @@ impl SctpStream {
     /// `EMSGSIZE`.
     pub async fn send_msg(&self, buf: &[u8], info: &SendInfo) -> io::Result<usize> {
         common::write_op(&self.io, |s| s.send_msg(buf, None, info)).await
+    }
+
+    /// Closes this one-to-one association with an immediate SCTP ABORT.
+    /// Linux rejects `SCTP_ABORT` in `sendmsg` on one-to-one sockets, so
+    /// this consumes the stream and closes it with zero `SO_LINGER`.
+    /// The close does not wait for queued DATA or send-buffer space.
+    pub fn abort(self) -> io::Result<()> {
+        common::sock(&self.io).set_abort_on_close()?;
+        let _io = self.io;
+        Ok(())
     }
 
     /// Receives the next message or notification into `buf`.
@@ -114,6 +146,30 @@ pub struct StreamBuilder {
 }
 
 impl StreamBuilder {
+    /// Sets future-association RTO values.
+    pub fn rto_info(self, info: &RtoInfo) -> io::Result<StreamBuilder> {
+        self.sock.set_rto_info(AssocId::FUTURE, info)?;
+        Ok(self)
+    }
+
+    /// Sets future-association peer address defaults.
+    pub fn peer_addr_params(self, params: &PeerAddrParams) -> io::Result<StreamBuilder> {
+        self.sock
+            .set_peer_addr_params(AssocId::FUTURE, None, params)?;
+        Ok(self)
+    }
+
+    /// Sets future-association delayed SACK parameters.
+    pub fn delayed_sack(self, info: &SackInfo) -> io::Result<StreamBuilder> {
+        self.sock.set_delayed_sack(AssocId::FUTURE, info)?;
+        Ok(self)
+    }
+
+    /// Sets future-association retransmission parameters.
+    pub fn assoc_info(self, info: &AssocInfo) -> io::Result<StreamBuilder> {
+        self.sock.set_assoc_info(AssocId::FUTURE, info)?;
+        Ok(self)
+    }
     /// Binds local addresses (multi-homing and/or a fixed source port).
     pub fn bindx(self, addrs: &[SocketAddr]) -> io::Result<StreamBuilder> {
         self.sock.bindx_add(addrs)?;
@@ -151,6 +207,12 @@ impl StreamBuilder {
     /// Sets the receive buffer size (`SO_RCVBUF`).
     pub fn recv_buffer_size(self, size: usize) -> io::Result<StreamBuilder> {
         self.sock.set_recv_buffer_size(size)?;
+        Ok(self)
+    }
+
+    /// Sets `SO_REUSEADDR` before binding.
+    pub fn reuse_address(self, enabled: bool) -> io::Result<StreamBuilder> {
+        self.sock.set_reuse_address(enabled)?;
         Ok(self)
     }
 

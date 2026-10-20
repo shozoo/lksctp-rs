@@ -30,6 +30,18 @@ pub struct SctpEndpoint {
 }
 
 impl SctpEndpoint {
+    /// Registers an existing one-to-many socket with Tokio.
+    pub fn from_socket(sock: SctpSocket) -> io::Result<SctpEndpoint> {
+        if sock.inner.style()? != Style::OneToMany {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "socket is not one-to-many",
+            ));
+        }
+        Ok(SctpEndpoint {
+            io: common::register(sock.inner)?,
+        })
+    }
     /// Binds a listening endpoint on one address with default parameters
     /// and a backlog of 128. See [`EndpointBuilder`] for more control.
     pub fn bind(addr: SocketAddr) -> io::Result<SctpEndpoint> {
@@ -165,6 +177,12 @@ impl EndpointBuilder {
         Ok(self)
     }
 
+    /// Sets `SO_REUSEADDR` before binding.
+    pub fn reuse_address(self, enabled: bool) -> io::Result<EndpointBuilder> {
+        self.sock.set_reuse_address(enabled)?;
+        Ok(self)
+    }
+
     /// Finishes as a listening endpoint: inbound associations are accepted
     /// (and outbound ones can still be initiated).
     pub fn listen(self, backlog: i32) -> io::Result<SctpEndpoint> {
@@ -174,8 +192,6 @@ impl EndpointBuilder {
 
     /// Finishes as a client-only endpoint (no inbound associations).
     pub fn build(self) -> io::Result<SctpEndpoint> {
-        Ok(SctpEndpoint {
-            io: common::register(self.sock.inner)?,
-        })
+        SctpEndpoint::from_socket(self.sock)
     }
 }

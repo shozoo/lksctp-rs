@@ -209,6 +209,73 @@ macro_rules! impl_common_sockopts {
                 crate::net::common::sock(&self.io).set_rto_info(assoc_id, rto)
             }
 
+            /// Returns association retransmission and receive-window parameters.
+            pub fn assoc_info(
+                &self,
+                assoc_id: crate::AssocId,
+            ) -> std::io::Result<crate::AssocInfo> {
+                crate::net::common::sock(&self.io).assoc_info(assoc_id)
+            }
+
+            /// Returns cumulative association counters and maximum observed
+            /// RTO. Reading restarts the maximum-RTO observation period; its
+            /// address may remain stale until another maximum is observed.
+            pub fn assoc_stats(
+                &self,
+                assoc_id: crate::AssocId,
+            ) -> std::io::Result<crate::AssocStats> {
+                crate::net::common::sock(&self.io).assoc_stats(assoc_id)
+            }
+
+            /// Sets association retransmission limit and cookie lifetime.
+            /// Zero fields leave the current kernel values unchanged.
+            pub fn set_assoc_info(
+                &self,
+                assoc_id: crate::AssocId,
+                info: &crate::AssocInfo,
+            ) -> std::io::Result<()> {
+                crate::net::common::sock(&self.io).set_assoc_info(assoc_id, info)
+            }
+
+            /// Returns delayed SACK parameters.
+            pub fn delayed_sack(
+                &self,
+                assoc_id: crate::AssocId,
+            ) -> std::io::Result<crate::SackInfo> {
+                crate::net::common::sock(&self.io).delayed_sack(assoc_id)
+            }
+
+            /// Sets delayed SACK parameters. Zero fields leave stored values
+            /// unchanged on Linux; frequency 1 disables delayed SACK, which
+            /// a subsequent get reports as `delay_ms = 0, freq = 1`.
+            pub fn set_delayed_sack(
+                &self,
+                assoc_id: crate::AssocId,
+                info: &crate::SackInfo,
+            ) -> std::io::Result<()> {
+                crate::net::common::sock(&self.io).set_delayed_sack(assoc_id, info)
+            }
+
+            /// Returns whether `SO_REUSEADDR` is enabled.
+            pub fn reuse_address(&self) -> std::io::Result<bool> {
+                crate::net::common::sock(&self.io).reuse_address()
+            }
+
+            /// Sets `SO_REUSEADDR`.
+            pub fn set_reuse_address(&self, enabled: bool) -> std::io::Result<()> {
+                crate::net::common::sock(&self.io).set_reuse_address(enabled)
+            }
+
+            /// Returns whether `SCTP_REUSE_PORT` is enabled.
+            pub fn reuse_port(&self) -> std::io::Result<bool> {
+                crate::net::common::sock(&self.io).reuse_port()
+            }
+
+            /// Sets `SCTP_REUSE_PORT` on a one-to-one socket before binding.
+            pub fn set_reuse_port(&self, enabled: bool) -> std::io::Result<()> {
+                crate::net::common::sock(&self.io).set_reuse_port(enabled)
+            }
+
             /// Subscribes to (or unsubscribes from) a notification class
             /// (`SCTP_EVENT`); events arrive through the receive path.
             pub fn subscribe_event(
