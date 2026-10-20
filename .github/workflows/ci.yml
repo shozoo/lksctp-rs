@@ -18,6 +18,7 @@ jobs:
           sudo modprobe sctp || true
           python3 -c 'import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 132); s.close()'
       - run: cargo test --all-targets
+      - run: cargo test --doc
       - run: cargo test --no-default-features
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo fmt --check

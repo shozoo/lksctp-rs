@@ -8,6 +8,7 @@ fi
 
 python3 -c 'import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM, 132); s.close()'
 cargo test --all-targets
+cargo test --doc
 cargo test --no-default-features
 RUSTDOCFLAGS='-D warnings' cargo doc --no-deps
 cargo clippy --all-targets -- -D warnings
